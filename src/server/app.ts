@@ -1,6 +1,11 @@
 import Fastify, { type FastifyServerOptions } from 'fastify';
 
-import { validatePlan, type Plan, type PlanRecord } from '../shared/plan';
+import {
+  toPlanListItem,
+  validatePlan,
+  type Plan,
+  type PlanRecord,
+} from '../shared/plan';
 import { planSchema } from '../shared/plan-schema';
 import { resolveCapability, validateSettingsDraft } from '../shared/settings';
 import { AppError, errorEnvelope } from './errors';
@@ -143,6 +148,24 @@ export function buildApp(options: FastifyServerOptions = {}, dependencies: AppDe
       request.raw.off('aborted', abortIfDisconnected);
       reply.raw.off('close', abortIfDisconnected);
     }
+  });
+
+  app.get('/api/plans', async () => {
+    const records = await planStore.list();
+    const usage = await planStore.usage();
+    const plans = records.map(toPlanListItem);
+
+    return { plans, usage };
+  });
+
+  app.delete<{ Params: { id: string } }>('/api/plans/:id', async (request, reply) => {
+    await planStore.remove(request.params.id);
+    return reply.code(204).send();
+  });
+
+  app.delete('/api/plans', async (_request, reply) => {
+    await planStore.clear();
+    return reply.code(204).send();
   });
 
   app.get<{ Params: { id: string } }>('/api/plans/:id', async (request) => {

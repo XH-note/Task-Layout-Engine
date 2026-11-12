@@ -1,13 +1,25 @@
 import { create } from 'zustand';
 
 import {
+  comparePlansByUpdatedAt,
+  toPlanListItem,
   updatePlanNode,
   validatePlan,
+  type PlanHistoryUsage,
   type PlanIssue,
+  type PlanListItem,
   type PlanNode,
   type PlanRecord,
 } from '../shared/plan';
-import { ApiError, generatePlan, getPlan, updatePlan } from './api';
+import {
+  ApiError,
+  clearPlans as clearPlansRequest,
+  deletePlan as deletePlanRequest,
+  generatePlan,
+  getPlan,
+  listPlans,
+  updatePlan,
+} from './api';
 import { readStorageValue, writeStorageValue } from './browser-storage';
 import { mapGenerationFailure, type GenerationFailure } from './generation-errors';
 
@@ -39,10 +51,19 @@ type PlanState = {
   selectedNodeId: string | null;
   saveState: SaveState;
   editError: string | null;
+  history: PlanListItem[];
+  usage: PlanHistoryUsage;
+  historyLoading: boolean;
+  historyError: string | null;
   restore: () => Promise<void>;
   generate: (source: string) => Promise<void>;
   cancel: () => void;
   newPlan: () => Promise<void>;
+  refreshHistory: () => Promise<void>;
+  switchPlan: (id: string) => Promise<boolean>;
+  removePlan: (id: string) => Promise<boolean>;
+  clearHistory: () => Promise<boolean>;
+  renamePlan: (title: string) => void;
   selectNode: (id: string | null) => void;
   updateNode: (id: string, patch: Partial<PlanNode>) => void;
   saveNow: (options?: { keepalive?: boolean }) => Promise<void>;
@@ -57,6 +78,7 @@ let saveTimer: ReturnType<typeof setTimeout> | null = null;
 let editRevision = 0;
 let saving = false;
 let saveChain: Promise<void> = Promise.resolve();
+let historyRequest = 0;
 
 function readCurrentPlanId(): string | null {
   return readStorageValue('local', CURRENT_PLAN_KEY);
@@ -123,6 +145,17 @@ function describeSaveFailure(error: unknown): string {
   return error.message || '保存失败，修改暂未写入。';
 }
 
+function sortHistory(items: PlanListItem[]): PlanListItem[] {
+  return [...items].sort(comparePlansByUpdatedAt);
+}
+
+function upsertHistory(history: PlanListItem[], record: PlanRecord): PlanListItem[] {
+  return sortHistory([
+    toPlanListItem(record),
+    ...history.filter((item) => item.id !== record.id),
+  ]);
+}
+
 export const usePlanStore = create<PlanState>((set, get) => {
   function scheduleSave() {
     clearSaveTimer();
@@ -166,12 +199,18 @@ export const usePlanStore = create<PlanState>((set, get) => {
       if (!current || current.id !== record.id) return;
 
       if (editRevision === revision) {
-        set({ record: saved, saveState: { status: 'idle' } });
+        set((state) => ({
+          record: saved,
+          saveState: { status: 'idle' },
+          history: upsertHistory(state.history, saved),
+        }));
       } else {
-        set({
-          record: { ...current, updatedAt: saved.updatedAt },
+        const updated = { ...current, updatedAt: saved.updatedAt };
+        set((state) => ({
+          record: updated,
           saveState: { status: 'dirty' },
-        });
+          history: upsertHistory(state.history, updated),
+        }));
         scheduleSave();
       }
     } catch (error) {
@@ -209,6 +248,10 @@ export const usePlanStore = create<PlanState>((set, get) => {
     selectedNodeId: null,
     saveState: { status: 'idle' },
     editError: null,
+    history: [],
+    usage: { count: 0, bytes: 0 },
+    historyLoading: false,
+    historyError: null,
 
     restore: async () => {
       if (get().restored) return;
@@ -216,6 +259,7 @@ export const usePlanStore = create<PlanState>((set, get) => {
       const interrupted = readStorageValue('session', GENERATING_KEY) === '1';
       if (interrupted) setGeneratingFlag(false);
       set({ restored: true, interrupted });
+      void get().refreshHistory();
 
       const id = readCurrentPlanId();
       if (!id) return;
@@ -266,6 +310,7 @@ export const usePlanStore = create<PlanState>((set, get) => {
           saveState: { status: 'idle' },
           editError: null,
         });
+        void get().refreshHistory();
       } catch (error) {
         if (activeController !== controller) return;
 
@@ -334,6 +379,174 @@ export const usePlanStore = create<PlanState>((set, get) => {
         saveState: { status: 'idle' },
         editError: null,
       });
+    },
+
+    refreshHistory: async () => {
+      const requestId = (historyRequest += 1);
+      set({ historyLoading: true });
+
+      try {
+        const data = await listPlans();
+        if (requestId !== historyRequest) return;
+
+        const current = get().record;
+        const plans = current
+          ? data.plans.map((item) =>
+              item.id === current.id ? { ...item, title: current.title } : item,
+            )
+          : data.plans;
+
+        set({
+          history: plans,
+          usage: data.usage,
+          historyLoading: false,
+          historyError: null,
+        });
+      } catch {
+        if (requestId !== historyRequest) return;
+
+        set({
+          historyLoading: false,
+          historyError: '无法读取历史记录，请稍后重试。',
+        });
+      }
+    },
+
+    switchPlan: async (id) => {
+      const state = get();
+      if (state.record?.id === id) return true;
+
+      const wasGenerating = state.generation.phase === 'generating';
+      if (wasGenerating) get().cancel();
+
+      await get().saveNow();
+
+      const status = get().saveState.status;
+      if (
+        status === 'error' ||
+        status === 'invalid' ||
+        status === 'dirty' ||
+        status === 'saving'
+      ) {
+        set({ notice: '当前修改尚未保存，暂不能切换计划。请先处理保存问题。' });
+        return false;
+      }
+
+      try {
+        const record = await getPlan(id);
+        writeCurrentPlanId(id);
+        set({
+          record,
+          selectedNodeId: null,
+          saveState: { status: 'idle' },
+          editError: null,
+          historyError: null,
+          notice: wasGenerating ? '已取消生成。' : null,
+        });
+        return true;
+      } catch (error) {
+        if (error instanceof ApiError && error.code === 'NOT_FOUND') {
+          set({ historyError: '这份计划书已不存在，已从历史中移除。' });
+          void get().refreshHistory();
+        } else {
+          set({ historyError: '加载计划失败，请稍后重试。' });
+        }
+
+        return false;
+      }
+    },
+
+    removePlan: async (id) => {
+      const current = get().record?.id === id;
+      if (current && get().generation.phase === 'generating') get().cancel();
+
+      if (current) {
+        if (get().saveState.status === 'saving') await saveChain;
+        clearSaveTimer();
+      }
+
+      try {
+        await deletePlanRequest(id);
+      } catch (error) {
+        if (error instanceof ApiError && error.code === 'NOT_FOUND') {
+          set({ historyError: '这份计划书已不存在。' });
+          void get().refreshHistory();
+        } else {
+          set({ historyError: '删除失败，请稍后重试。' });
+        }
+
+        if (current && get().saveState.status === 'dirty') scheduleSave();
+        return false;
+      }
+
+      if (get().record?.id === id) {
+        clearSaveTimer();
+        editRevision += 1;
+        writeCurrentPlanId(null);
+        set({
+          record: null,
+          selectedNodeId: null,
+          saveState: { status: 'idle' },
+          editError: null,
+          notice: null,
+        });
+      }
+
+      await get().refreshHistory();
+      return true;
+    },
+
+    clearHistory: async () => {
+      const wasGenerating = get().generation.phase === 'generating';
+      if (wasGenerating) get().cancel();
+      if (get().saveState.status === 'saving') await saveChain;
+
+      const hadPendingEdits = get().saveState.status === 'dirty';
+      clearSaveTimer();
+
+      try {
+        await clearPlansRequest();
+      } catch {
+        set({ historyError: '清空失败，请稍后重试。' });
+        if (hadPendingEdits) scheduleSave();
+        return false;
+      }
+
+      editRevision += 1;
+      writeCurrentPlanId(null);
+      set({
+        record: null,
+        selectedNodeId: null,
+        saveState: { status: 'idle' },
+        editError: null,
+        notice: wasGenerating ? '已取消生成。' : null,
+      });
+
+      await get().refreshHistory();
+      return true;
+    },
+
+    renamePlan: (title) => {
+      const record = get().record;
+      if (!record) return;
+
+      const trimmed = title.trim();
+      if (!trimmed || trimmed === record.title) return;
+
+      editRevision += 1;
+      set((state) => ({
+        record: {
+          ...record,
+          title: trimmed,
+          plan: { ...record.plan, title: trimmed },
+        },
+        saveState: { status: 'dirty' },
+        editError: null,
+        history: state.history.map((item) =>
+          item.id === record.id ? { ...item, title: trimmed } : item,
+        ),
+      }));
+      scheduleSave();
     },
 
     selectNode: (id) => {

@@ -9,6 +9,7 @@ import {
   GenerationProgress,
   RETAINED_SOURCE_NOTE,
 } from './GenerationFeedback';
+import HistoryMenu from './HistoryMenu';
 import Inspector from './Inspector';
 import PlanDocument from './PlanDocument';
 import SettingsDialog from './SettingsDialog';
@@ -94,6 +95,7 @@ export default function App() {
   const selectNode = usePlanStore((state) => state.selectNode);
   const saveState = usePlanStore((state) => state.saveState);
   const retrySave = usePlanStore((state) => state.retrySave);
+  const renamePlan = usePlanStore((state) => state.renamePlan);
   const dismissIssue = usePlanStore((state) => state.dismissIssue);
   const dismissInterrupted = usePlanStore((state) => state.dismissInterrupted);
   const dismissNotice = usePlanStore((state) => state.dismissNotice);
@@ -178,6 +180,7 @@ export default function App() {
         record={record}
         selectedNodeId={selectedNodeId}
         onSelectNode={selectNode}
+        onRenamePlan={renamePlan}
       />
     </div>
   ) : null;
@@ -225,12 +228,7 @@ export default function App() {
           <button className="quiet-button" type="button" onClick={handleNewPlan}>
             新建计划
           </button>
-          <button className="quiet-button" type="button" disabled title="历史记录将在后续切片接入">
-            历史记录
-            <span className="chevron" aria-hidden="true">
-              ▾
-            </span>
-          </button>
+          <HistoryMenu />
           <button className="quiet-button" type="button" onClick={() => setSettingsOpen(true)}>
             设置
           </button>
@@ -345,6 +343,7 @@ export default function App() {
                 record={record}
                 selectedNodeId={selectedNodeId}
                 onSelectNode={selectNode}
+                onRenamePlan={renamePlan}
               />
             ) : (
               <div className="empty-document">

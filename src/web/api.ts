@@ -1,4 +1,4 @@
-import type { Plan, PlanRecord } from '../shared/plan';
+import type { Plan, PlanListResponse, PlanRecord } from '../shared/plan';
 import type {
   PublicSettings,
   SettingsDraft,
@@ -131,6 +131,20 @@ export function generatePlan(
 
 export function getPlan(id: string): Promise<PlanRecord> {
   return request<PlanRecord>(`/api/plans/${encodeURIComponent(id)}`);
+}
+
+export function listPlans(): Promise<PlanListResponse> {
+  return request<PlanListResponse>('/api/plans');
+}
+
+export function deletePlan(id: string): Promise<void> {
+  return request<void>(`/api/plans/${encodeURIComponent(id)}`, {
+    method: 'DELETE',
+  });
+}
+
+export function clearPlans(): Promise<void> {
+  return request<void>('/api/plans', { method: 'DELETE' });
 }
 
 export function updatePlan(

@@ -1,7 +1,11 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 
-import type { PlanRecord } from '../shared/plan';
+import {
+  comparePlansByUpdatedAt,
+  type PlanHistoryUsage,
+  type PlanRecord,
+} from '../shared/plan';
 import { writeJsonAtomically } from './atomic-json';
 import { AppError } from './errors';
 import { defaultSettingsDir } from './settings-store';
@@ -28,6 +32,7 @@ export class PlanStore {
   private readonly dataDir: string;
   private loadPromise: Promise<void> | null = null;
   private plans: PlanRecord[] = [];
+  private bytes = 0;
 
   constructor(dataDir = defaultSettingsDir()) {
     this.dataDir = dataDir;
@@ -50,6 +55,7 @@ export class PlanStore {
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
         this.plans = [];
+        this.bytes = 0;
         return;
       }
 
@@ -59,6 +65,8 @@ export class PlanStore {
     }
 
     let payload: unknown;
+
+    this.bytes = Buffer.byteLength(text, 'utf8');
 
     try {
       payload = JSON.parse(text);
@@ -92,19 +100,19 @@ export class PlanStore {
     return this.plans.find((plan) => plan.id === id) ?? null;
   }
 
+  async list(): Promise<PlanRecord[]> {
+    await this.ensureLoaded();
+    return [...this.plans].sort(comparePlansByUpdatedAt);
+  }
+
+  async usage(): Promise<PlanHistoryUsage> {
+    await this.ensureLoaded();
+    return { count: this.plans.length, bytes: this.bytes };
+  }
+
   async create(record: PlanRecord): Promise<PlanRecord> {
     await this.ensureLoaded();
-
-    const previous = this.plans;
-    this.plans = [record, ...this.plans];
-
-    try {
-      await this.write();
-    } catch (error) {
-      this.plans = previous;
-      throw error;
-    }
-
+    await this.commit([record, ...this.plans]);
     return record;
   }
 
@@ -116,9 +124,31 @@ export class PlanStore {
       throw new AppError('NOT_FOUND', 404, '找不到该任务计划书。');
     }
 
-    const previous = this.plans;
     const next = [...this.plans];
     next[index] = record;
+    await this.commit(next);
+    return record;
+  }
+
+  async remove(id: string): Promise<void> {
+    await this.ensureLoaded();
+
+    if (!this.plans.some((plan) => plan.id === id)) {
+      throw new AppError('NOT_FOUND', 404, '找不到该任务计划书。');
+    }
+
+    await this.commit(this.plans.filter((plan) => plan.id !== id));
+  }
+
+  async clear(): Promise<void> {
+    await this.ensureLoaded();
+    if (this.plans.length === 0) return;
+
+    await this.commit([]);
+  }
+
+  private async commit(next: PlanRecord[]): Promise<void> {
+    const previous = this.plans;
     this.plans = next;
 
     try {
@@ -127,8 +157,6 @@ export class PlanStore {
       this.plans = previous;
       throw error;
     }
-
-    return record;
   }
 
   private async write(): Promise<void> {
@@ -138,7 +166,7 @@ export class PlanStore {
     };
 
     try {
-      await writeJsonAtomically(this.dataDir, PLANS_FILE_NAME, payload);
+      this.bytes = await writeJsonAtomically(this.dataDir, PLANS_FILE_NAME, payload);
     } catch (error) {
       throw storageError('无法写入任务计划书数据文件。', {
         message: error instanceof Error ? error.message : String(error),

@@ -6,7 +6,7 @@ export async function writeJsonAtomically(
   dataDir: string,
   fileName: string,
   payload: unknown,
-): Promise<void> {
+): Promise<number> {
   await fs.mkdir(dataDir, { recursive: true });
 
   const targetPath = path.join(dataDir, fileName);
@@ -14,9 +14,10 @@ export async function writeJsonAtomically(
     dataDir,
     `.${fileName}.${process.pid}.${randomUUID()}.tmp`,
   );
+  const text = `${JSON.stringify(payload, null, 2)}\n`;
 
   try {
-    await fs.writeFile(temporaryPath, `${JSON.stringify(payload, null, 2)}\n`, {
+    await fs.writeFile(temporaryPath, text, {
       encoding: 'utf8',
       mode: 0o600,
     });
@@ -34,4 +35,6 @@ export async function writeJsonAtomically(
     await fs.rm(temporaryPath, { force: true });
     throw error;
   }
+
+  return Buffer.byteLength(text, 'utf8');
 }

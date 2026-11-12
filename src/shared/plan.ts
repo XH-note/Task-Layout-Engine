@@ -43,6 +43,39 @@ export interface PlanRecord {
   raw?: unknown;
 }
 
+export interface PlanListItem {
+  id: string;
+  title: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface PlanHistoryUsage {
+  count: number;
+  bytes: number;
+}
+
+export interface PlanListResponse {
+  plans: PlanListItem[];
+  usage: PlanHistoryUsage;
+}
+
+export function comparePlansByUpdatedAt(
+  a: { updatedAt: string },
+  b: { updatedAt: string },
+): number {
+  return b.updatedAt.localeCompare(a.updatedAt);
+}
+
+export function toPlanListItem(record: PlanRecord): PlanListItem {
+  return {
+    id: record.id,
+    title: record.title,
+    createdAt: record.createdAt,
+    updatedAt: record.updatedAt,
+  };
+}
+
 export interface PlanIssue {
   path: string;
   message: string;

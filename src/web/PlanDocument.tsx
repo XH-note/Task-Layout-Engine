@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 
 import type { PlanRecord } from '../shared/plan';
 import {
@@ -43,19 +43,65 @@ export default function PlanDocument({
   record,
   selectedNodeId,
   onSelectNode,
+  onRenamePlan,
 }: {
   record: PlanRecord;
   selectedNodeId: string | null;
   onSelectNode: (id: string) => void;
+  onRenamePlan: (title: string) => void;
 }) {
   const { plan } = record;
   const summary = computePlanSummary(plan);
+  const [editingTitle, setEditingTitle] = useState(false);
+  const [titleDraft, setTitleDraft] = useState(record.title);
+
+  useEffect(() => {
+    setEditingTitle(false);
+  }, [record.id]);
+
+  const startRename = () => {
+    setTitleDraft(record.title);
+    setEditingTitle(true);
+  };
+
+  const commitRename = () => {
+    const trimmed = titleDraft.trim();
+    if (trimmed && trimmed !== record.title) onRenamePlan(trimmed);
+    setEditingTitle(false);
+  };
 
   return (
     <article className="plan-document">
       <header className="plan-document-heading">
         <p className="eyebrow">任务计划书</p>
-        <h3>{record.title}</h3>
+        <div className="plan-title-row">
+          {editingTitle ? (
+            <input
+              className="plan-title-input"
+              type="text"
+              value={titleDraft}
+              onChange={(event) => setTitleDraft(event.target.value)}
+              onBlur={commitRename}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') {
+                  event.currentTarget.blur();
+                } else if (event.key === 'Escape') {
+                  setTitleDraft(record.title);
+                  setEditingTitle(false);
+                }
+              }}
+              aria-label="计划标题"
+              autoFocus
+            />
+          ) : (
+            <>
+              <h3>{record.title}</h3>
+              <button className="title-edit-button" type="button" onClick={startRename}>
+                重命名
+              </button>
+            </>
+          )}
+        </div>
         <dl className="plan-meta">
           <div>
             <dt>阶段数</dt>
