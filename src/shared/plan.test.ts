@@ -7,10 +7,15 @@ import {
 } from '../test-support/wire-plan';
 import {
   collectLeafOptions,
+  collectSubtreeIds,
   computeNodeNumbers,
+  countDependenciesTo,
+  createLeafDraft,
   findPlanNode,
   findPlanNodePath,
+  insertChildNode,
   normalizeWirePlan,
+  removePlanNode,
   updatePlanNode,
   validatePlan,
   type PlanNode,
@@ -415,6 +420,197 @@ describe('updatePlanNode', () => {
     expect(updatePlanNode(plan.nodes, 'missing', { title: 'x' })).toBe(
       plan.nodes,
     );
+  });
+});
+
+describe('collectSubtreeIds', () => {
+  it('collects a node and every descendant', () => {
+    const { plan } = normalized();
+
+    expect(collectSubtreeIds(plan.nodes, 'id-1')).toEqual([
+      'id-1',
+      'id-2',
+      'id-3',
+      'id-4',
+      'id-5',
+    ]);
+    expect(collectSubtreeIds(plan.nodes, 'id-2')).toEqual(['id-2']);
+  });
+
+  it('returns an empty list for an unknown node', () => {
+    const { plan } = normalized();
+
+    expect(collectSubtreeIds(plan.nodes, 'missing')).toEqual([]);
+  });
+});
+
+describe('countDependenciesTo', () => {
+  it('counts dependencies pointing at the target set', () => {
+    const { plan } = normalized();
+
+    expect(countDependenciesTo(plan.nodes, ['id-5'])).toBe(1);
+    expect(countDependenciesTo(plan.nodes, new Set(['id-2', 'id-5']))).toBe(1);
+    expect(countDependenciesTo(plan.nodes, ['id-2'])).toBe(0);
+  });
+});
+
+describe('insertChildNode', () => {
+  it('appends a leaf under a stage without mutating the original tree', () => {
+    const { plan } = normalized();
+    const draft = createLeafDraft('id-16');
+    const nodes = insertChildNode(plan.nodes, 'id-6', draft);
+    const stage = findPlanNode(nodes, 'id-6');
+
+    expect(stage?.children).toHaveLength(5);
+    expect(stage?.children?.[4]).toEqual(draft);
+    expect(findPlanNode(plan.nodes, 'id-6')?.children).toHaveLength(4);
+    expect(validatePlan({ ...plan, nodes })).toEqual([]);
+  });
+
+  it('rejects a leaf parent and a fourth level', () => {
+    const { plan } = normalized();
+    const draft = createLeafDraft('id-16');
+
+    expect(insertChildNode(plan.nodes, 'id-2', draft)).toBe(plan.nodes);
+
+    const nested: PlanNode[] = [
+      {
+        id: 'stage',
+        title: '阶段',
+        children: [
+          {
+            id: 'group',
+            title: '分组',
+            children: [{ id: 'task', title: '任务' }],
+          },
+        ],
+      },
+    ];
+
+    expect(insertChildNode(nested, 'task', draft)).toBe(nested);
+    expect(insertChildNode(nested, 'group', draft)).not.toBe(nested);
+
+    const tooDeep: PlanNode[] = [
+      {
+        id: 'stage',
+        title: '阶段',
+        children: [
+          {
+            id: 'group',
+            title: '分组',
+            children: [
+              {
+                id: 'subgroup',
+                title: '子分组',
+                children: [{ id: 'task', title: '任务' }],
+              },
+            ],
+          },
+        ],
+      },
+    ];
+
+    expect(insertChildNode(tooDeep, 'subgroup', draft)).toBe(tooDeep);
+  });
+
+  it('returns the original array when the parent is absent', () => {
+    const { plan } = normalized();
+
+    expect(insertChildNode(plan.nodes, 'missing', createLeafDraft('id-16'))).toBe(
+      plan.nodes,
+    );
+  });
+});
+
+describe('removePlanNode', () => {
+  it('removes a leaf and clears dependencies that pointed at it', () => {
+    const { plan } = normalized();
+    const result = removePlanNode(plan.nodes, 'id-5');
+
+    expect(result.removedNodeIds).toEqual(['id-5']);
+    expect(result.clearedDependencies).toBe(1);
+    expect(findPlanNode(result.nodes, 'id-8')).not.toHaveProperty('deps');
+    expect(findPlanNode(plan.nodes, 'id-8')?.deps).toEqual(['id-5']);
+    expect(validatePlan({ ...plan, nodes: result.nodes })).toEqual([]);
+  });
+
+  it('removes a group with its whole subtree', () => {
+    const { plan } = normalized();
+    const result = removePlanNode(plan.nodes, 'id-6');
+
+    expect(result.removedNodeIds).toEqual([
+      'id-6',
+      'id-7',
+      'id-8',
+      'id-9',
+      'id-10',
+    ]);
+    expect(result.nodes).toHaveLength(2);
+    expect(validatePlan({ ...plan, nodes: result.nodes })).toEqual([]);
+  });
+
+  it('clears dependencies inside a removed stage and leaves the rest valid', () => {
+    const { plan } = normalized();
+    const result = removePlanNode(plan.nodes, 'id-1');
+
+    expect(result.removedNodeIds).toEqual([
+      'id-1',
+      'id-2',
+      'id-3',
+      'id-4',
+      'id-5',
+    ]);
+    expect(result.clearedDependencies).toBe(1);
+    expect(findPlanNode(result.nodes, 'id-8')).not.toHaveProperty('deps');
+    expect(validatePlan({ ...plan, nodes: result.nodes })).toEqual([]);
+  });
+
+  it('prunes empty ancestors after removing their last child', () => {
+    const nodes: PlanNode[] = [
+      {
+        id: 'stage',
+        title: '阶段',
+        children: [
+          {
+            id: 'group',
+            title: '分组',
+            children: [{ id: 'task', title: '任务' }],
+          },
+        ],
+      },
+    ];
+    const result = removePlanNode(nodes, 'task');
+
+    expect(result.removedNodeIds).toEqual(['task', 'group', 'stage']);
+    expect(result.nodes).toEqual([]);
+    expect(nodes).toHaveLength(1);
+  });
+
+  it('returns the original tree when the node is absent', () => {
+    const { plan } = normalized();
+    const result = removePlanNode(plan.nodes, 'missing');
+
+    expect(result.nodes).toBe(plan.nodes);
+    expect(result.removedNodeIds).toEqual([]);
+    expect(result.clearedDependencies).toBe(0);
+  });
+});
+
+describe('createLeafDraft', () => {
+  it('creates a placeholder leaf that passes leaf validation', () => {
+    const { plan } = normalized();
+    const draft = createLeafDraft('id-16');
+    const nodes = insertChildNode(plan.nodes, 'id-6', draft);
+
+    expect(draft).toMatchObject({
+      id: 'id-16',
+      title: '新任务',
+      priority: 'P2',
+      estimateHours: 1,
+    });
+    expect(draft.acceptance?.trim()).not.toBe('');
+    expect(draft.children).toBeUndefined();
+    expect(validatePlan({ ...plan, nodes })).toEqual([]);
   });
 });
 

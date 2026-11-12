@@ -6,7 +6,10 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import {
   collectLeaves,
+  createLeafDraft,
+  insertChildNode,
   normalizeWirePlan,
+  removePlanNode,
   type PlanNode,
   type PlanRecord,
 } from '../shared/plan';
@@ -97,6 +100,38 @@ describe('PUT /api/plans/:id', () => {
 
     const stored = await planStore.get(created.id);
     expect(stored).toEqual(updated);
+
+    const fetched = await app!.inject({
+      method: 'GET',
+      url: `/api/plans/${created.id}`,
+    });
+    expect(fetched.json<PlanRecord>()).toEqual(updated);
+  });
+
+  it('persists added and removed nodes through autosave', async () => {
+    const created = await seed();
+    const nodes = insertChildNode(
+      created.plan.nodes,
+      'node-1',
+      createLeafDraft('new-node'),
+    );
+    const removal = removePlanNode(nodes, 'node-5');
+    const plan = { ...created.plan, nodes: removal.nodes };
+
+    expect(removal.clearedDependencies).toBe(1);
+
+    const response = await put(created.id, { title: created.title, plan });
+
+    expect(response.statusCode).toBe(200);
+    const updated = response.json<PlanRecord>();
+    expect(collectLeaves(updated.plan.nodes)).toHaveLength(12);
+    expect(leafByTitle(updated.plan.nodes, '新任务')).toMatchObject({
+      id: 'new-node',
+      estimateHours: 1,
+    });
+    expect(leafByTitle(updated.plan.nodes, '切换 DNS')).not.toHaveProperty(
+      'deps',
+    );
 
     const fetched = await app!.inject({
       method: 'GET',

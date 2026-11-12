@@ -1,9 +1,13 @@
+import { useState } from 'react';
+
 import {
   collectLeafOptions,
   computeNodeNumbers,
   findPlanNode,
   findPlanNodePath,
   isGroup,
+  MAX_TASK_DEPTH,
+  removePlanNode,
   type PlanNode,
   type Priority,
 } from '../shared/plan';
@@ -31,8 +35,17 @@ export default function Inspector() {
   const record = usePlanStore((state) => state.record);
   const selectedNodeId = usePlanStore((state) => state.selectedNodeId);
   const updateNode = usePlanStore((state) => state.updateNode);
+  const addChildNode = usePlanStore((state) => state.addChildNode);
+  const deleteNode = usePlanStore((state) => state.deleteNode);
   const saveState = usePlanStore((state) => state.saveState);
   const editError = usePlanStore((state) => state.editError);
+  const [pendingDelete, setPendingDelete] = useState<{
+    nodeId: string;
+    title: string;
+    removedNodes: number;
+    clearedDependencies: number;
+    blocked: boolean;
+  } | null>(null);
 
   if (!record || !selectedNodeId) {
     return <EmptyInspector />;
@@ -60,6 +73,25 @@ export default function Inspector() {
       : null);
 
   const patch = (value: Partial<PlanNode>) => updateNode(node.id, value);
+  const canAddChild = !leaf && path.length < MAX_TASK_DEPTH;
+
+  const requestDelete = () => {
+    const preview = removePlanNode(record.plan.nodes, node.id);
+
+    setPendingDelete({
+      nodeId: node.id,
+      title: node.title,
+      removedNodes: preview.removedNodeIds.length,
+      clearedDependencies: preview.clearedDependencies,
+      blocked: preview.nodes.length === 0,
+    });
+  };
+
+  const confirmDelete = () => {
+    if (!pendingDelete || pendingDelete.blocked) return;
+    deleteNode(pendingDelete.nodeId);
+    setPendingDelete(null);
+  };
 
   return (
     <div className="inspector-form">
@@ -221,12 +253,91 @@ export default function Inspector() {
           </div>
         </>
       ) : (
-        <p className="field-hint">分组节点只支持修改标题和说明。</p>
+        <p className="field-hint">
+          分组节点可修改标题和说明，也可以在下方新增叶子任务。
+        </p>
       )}
+
+      <div className="inspector-actions">
+        {canAddChild ? (
+          <button
+            className="secondary-button"
+            type="button"
+            onClick={() => addChildNode(node.id)}
+          >
+            加叶子任务
+          </button>
+        ) : null}
+        <button className="danger-button" type="button" onClick={requestDelete}>
+          删除
+        </button>
+      </div>
 
       <p className="inspector-hint">
         修改会在停止输入 {SAVE_DEBOUNCE_MS / 1000} 秒后自动保存。
       </p>
+
+      {pendingDelete ? (
+        <div
+          className="modal-backdrop"
+          role="presentation"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) setPendingDelete(null);
+          }}
+        >
+          <div
+            className="settings-dialog inspector-delete-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="inspector-delete-title"
+          >
+            <h2 id="inspector-delete-title">
+              删除“{pendingDelete.title || '未命名节点'}”？
+            </h2>
+            {pendingDelete.blocked ? (
+              <p className="inspector-error" role="alert">
+                计划至少需要一个阶段，无法删除最后一个阶段。
+              </p>
+            ) : (
+              <>
+                <p>
+                  {pendingDelete.removedNodes > 1 ? (
+                    <>
+                      将连带删除{' '}
+                      <strong>{pendingDelete.removedNodes}</strong> 个节点。
+                    </>
+                  ) : (
+                    '将删除这个任务节点。'
+                  )}
+                </p>
+                <p>
+                  {pendingDelete.clearedDependencies > 0
+                    ? `另有 ${pendingDelete.clearedDependencies} 条依赖引用会被移除。`
+                    : '没有其他任务依赖它。'}
+                </p>
+              </>
+            )}
+            <div className="inspector-delete-actions">
+              <button
+                className="secondary-button"
+                type="button"
+                onClick={() => setPendingDelete(null)}
+              >
+                {pendingDelete.blocked ? '关闭' : '取消'}
+              </button>
+              {pendingDelete.blocked ? null : (
+                <button
+                  className="danger-button"
+                  type="button"
+                  onClick={confirmDelete}
+                >
+                  删除
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

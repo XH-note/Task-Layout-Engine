@@ -2,6 +2,8 @@ import type { WireNode, WirePlan } from './wire';
 
 export type Priority = 'P0' | 'P1' | 'P2';
 
+export const MAX_TASK_DEPTH = 3;
+
 export interface PlanNode {
   id: string;
   title: string;
@@ -229,10 +231,10 @@ export function validatePlan(
     nodes.forEach((node, index) => {
       const path = parentPath ? `${parentPath}.children[${index}]` : `nodes[${index}]`;
 
-      if (depth > 3) {
+      if (depth > MAX_TASK_DEPTH) {
         issues.push({
           path,
-          message: '任务层级最多 3 层（阶段 → 任务 → 子任务）。',
+          message: `任务层级最多 ${MAX_TASK_DEPTH} 层（阶段 → 任务 → 子任务）。`,
         });
         return;
       }
@@ -498,6 +500,171 @@ export function collectLeafOptions(nodes: PlanNode[]): LeafOption[] {
 
   walk(nodes, []);
   return options;
+}
+
+export function collectSubtreeIds(nodes: PlanNode[], id: string): string[] {
+  const node = findPlanNode(nodes, id);
+  if (!node) return [];
+
+  const ids: string[] = [];
+  const walk = (current: PlanNode) => {
+    ids.push(current.id);
+    current.children?.forEach(walk);
+  };
+
+  walk(node);
+  return ids;
+}
+
+export function countDependenciesTo(
+  nodes: PlanNode[],
+  targetIds: Iterable<string>,
+): number {
+  const targets = targetIds instanceof Set ? targetIds : new Set(targetIds);
+  let count = 0;
+
+  const walk = (list: PlanNode[]) => {
+    for (const node of list) {
+      if (!targets.has(node.id)) {
+        for (const dependencyId of node.deps ?? []) {
+          if (targets.has(dependencyId)) count += 1;
+        }
+      }
+      if (node.children && node.children.length > 0) walk(node.children);
+    }
+  };
+
+  walk(nodes);
+  return count;
+}
+
+export function insertChildNode(
+  nodes: PlanNode[],
+  parentId: string,
+  child: PlanNode,
+): PlanNode[] {
+  if (isGroup(child)) return nodes;
+
+  const walk = (list: PlanNode[], depth: number): PlanNode[] => {
+    let changed = false;
+    const next = list.map((node) => {
+      if (node.id === parentId) {
+        if (depth >= MAX_TASK_DEPTH || (depth > 1 && !isGroup(node))) {
+          return node;
+        }
+
+        changed = true;
+        return { ...node, children: [...(node.children ?? []), child] };
+      }
+
+      if (node.children && node.children.length > 0) {
+        const children = walk(node.children, depth + 1);
+        if (children !== node.children) {
+          changed = true;
+          return { ...node, children };
+        }
+      }
+
+      return node;
+    });
+
+    return changed ? next : list;
+  };
+
+  return walk(nodes, 1);
+}
+
+export type RemovePlanNodeResult = {
+  nodes: PlanNode[];
+  removedNodeIds: string[];
+  clearedDependencies: number;
+};
+
+export function removePlanNode(
+  nodes: PlanNode[],
+  id: string,
+): RemovePlanNodeResult {
+  const subtreeIds = collectSubtreeIds(nodes, id);
+  if (subtreeIds.length === 0) {
+    return { nodes, removedNodeIds: [], clearedDependencies: 0 };
+  }
+
+  const removed = new Set(subtreeIds);
+
+  const prune = (list: PlanNode[]): PlanNode[] => {
+    let changed = false;
+    const next: PlanNode[] = [];
+
+    for (const node of list) {
+      if (node.id === id) {
+        changed = true;
+        continue;
+      }
+
+      if (node.children && node.children.length > 0) {
+        const children = prune(node.children);
+        if (children !== node.children) {
+          changed = true;
+          if (children.length === 0) {
+            removed.add(node.id);
+            continue;
+          }
+          next.push({ ...node, children });
+          continue;
+        }
+      }
+
+      next.push(node);
+    }
+
+    return changed ? next : list;
+  };
+
+  const pruned = prune(nodes);
+  const clearedDependencies = countDependenciesTo(pruned, removed);
+
+  const clean = (list: PlanNode[]): PlanNode[] => {
+    let changed = false;
+    const next = list.map((node) => {
+      let updated = node;
+
+      if (node.deps && node.deps.some((dependencyId) => removed.has(dependencyId))) {
+        const deps = node.deps.filter((dependencyId) => !removed.has(dependencyId));
+        updated = { ...node, deps };
+        if (deps.length === 0) delete updated.deps;
+        changed = true;
+      }
+
+      if (node.children && node.children.length > 0) {
+        const children = clean(node.children);
+        if (children !== node.children) {
+          updated = { ...(updated === node ? node : updated), children };
+          changed = true;
+        }
+      }
+
+      return updated;
+    });
+
+    return changed ? next : list;
+  };
+
+  return {
+    nodes: clean(pruned),
+    removedNodeIds: [...removed],
+    clearedDependencies,
+  };
+}
+
+export function createLeafDraft(id: string = defaultNodeId()): PlanNode {
+  return {
+    id,
+    title: '新任务',
+    desc: '补充任务说明。',
+    priority: 'P2',
+    estimateHours: 1,
+    acceptance: '待补充验收标准。',
+  };
 }
 
 export function updatePlanNode(

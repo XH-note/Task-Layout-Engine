@@ -1607,6 +1607,53 @@ button.save-status-error:hover {
   font-size: 11px;
 }
 
+.inspector-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-top: 4px;
+}
+
+.inspector-actions .secondary-button,
+.inspector-actions .danger-button {
+  min-height: 34px;
+  padding: 0 12px;
+  font-size: 11px;
+}
+
+.inspector-delete-dialog {
+  width: min(380px, 100%);
+  padding: 22px;
+  gap: 10px;
+}
+
+.inspector-delete-dialog h2 {
+  margin: 0;
+  font-family: "Noto Serif SC", "Songti SC", "SimSun", serif;
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+}
+
+.inspector-delete-dialog p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.7;
+}
+
+.inspector-delete-dialog strong {
+  color: var(--warning);
+  font-variant-numeric: tabular-nums;
+}
+
+.inspector-delete-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding-top: 6px;
+}
+
 .app-footer {
   display: flex;
   align-items: center;

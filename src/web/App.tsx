@@ -309,7 +309,7 @@ export default function App() {
               <GenerationInterrupted onDismiss={dismissInterrupted} />
             ) : null}
 
-            {notice && generation.phase === 'idle' ? (
+            {notice ? (
               <GenerationNotice message={notice} onDismiss={dismissNotice} />
             ) : null}
 

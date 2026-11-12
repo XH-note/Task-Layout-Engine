@@ -2,6 +2,10 @@ import { create } from 'zustand';
 
 import {
   comparePlansByUpdatedAt,
+  createLeafDraft,
+  insertChildNode,
+  MAX_TASK_DEPTH,
+  removePlanNode,
   toPlanListItem,
   updatePlanNode,
   validatePlan,
@@ -66,6 +70,10 @@ type PlanState = {
   renamePlan: (title: string) => void;
   selectNode: (id: string | null) => void;
   updateNode: (id: string, patch: Partial<PlanNode>) => void;
+  addChildNode: (parentId: string) => string | null;
+  deleteNode: (
+    id: string,
+  ) => { removedNodes: number; clearedDependencies: number } | null;
   saveNow: (options?: { keepalive?: boolean }) => Promise<void>;
   retrySave: () => Promise<void>;
   dismissIssue: () => void;
@@ -581,6 +589,68 @@ export const usePlanStore = create<PlanState>((set, get) => {
         editError: null,
       });
       scheduleSave();
+    },
+
+    addChildNode: (parentId) => {
+      const record = get().record;
+      if (!record) return null;
+
+      const child = createLeafDraft();
+      const nodes = insertChildNode(record.plan.nodes, parentId, child);
+
+      if (nodes === record.plan.nodes) {
+        set({
+          editError: `只能在阶段或分组下新增叶子任务，且最多 ${MAX_TASK_DEPTH} 层。`,
+        });
+        return null;
+      }
+
+      editRevision += 1;
+      set({
+        record: { ...record, plan: { ...record.plan, nodes } },
+        selectedNodeId: child.id,
+        saveState: { status: 'dirty' },
+        editError: null,
+        notice: '已新增叶子任务，请补充标题和验收标准。',
+      });
+      scheduleSave();
+      return child.id;
+    },
+
+    deleteNode: (id) => {
+      const record = get().record;
+      if (!record) return null;
+
+      const result = removePlanNode(record.plan.nodes, id);
+      if (result.removedNodeIds.length === 0) return null;
+
+      if (result.nodes.length === 0) {
+        set({ editError: '计划至少需要一个阶段，无法删除最后一个阶段。' });
+        return null;
+      }
+
+      editRevision += 1;
+      set({
+        record: {
+          ...record,
+          plan: { ...record.plan, nodes: result.nodes },
+        },
+        selectedNodeId: result.removedNodeIds.includes(get().selectedNodeId ?? '')
+          ? null
+          : get().selectedNodeId,
+        saveState: { status: 'dirty' },
+        editError: null,
+        notice:
+          result.clearedDependencies > 0
+            ? `已删除 ${result.removedNodeIds.length} 个节点，并移除 ${result.clearedDependencies} 条依赖。`
+            : `已删除 ${result.removedNodeIds.length} 个节点。`,
+      });
+      scheduleSave();
+
+      return {
+        removedNodes: result.removedNodeIds.length,
+        clearedDependencies: result.clearedDependencies,
+      };
     },
 
     saveNow: async (options = {}) => {
