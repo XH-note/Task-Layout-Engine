@@ -1,3 +1,4 @@
+import type { PlanRecord } from '../shared/plan';
 import type {
   PublicSettings,
   SettingsDraft,
@@ -80,4 +81,16 @@ export function testConnection(draft: SettingsDraft): Promise<TestConnectionResu
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(draft),
   });
+}
+
+export function generatePlan(source: string): Promise<{ record: PlanRecord }> {
+  return request<{ record: PlanRecord }>('/api/generate', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ source }),
+  });
+}
+
+export function getPlan(id: string): Promise<PlanRecord> {
+  return request<PlanRecord>(`/api/plans/${encodeURIComponent(id)}`);
 }

@@ -1,16 +1,106 @@
 import { useEffect, useRef, useState } from 'react';
 
 import { MAX_SOURCE_CODE_POINTS, getSourceState } from '../shared/source';
+import {
+  GenerationBusy,
+  GenerationError,
+  GenerationInterrupted,
+  GenerationProgress,
+  RETAINED_SOURCE_NOTE,
+} from './GenerationFeedback';
+import PlanDocument from './PlanDocument';
 import SettingsDialog from './SettingsDialog';
+import { usePlanStore } from './plan-store';
+import type { GenerationPhase } from './plan-store';
 import { useWorkbenchStore } from './store';
+
+const ACTIVE_STATUS: Record<
+  Exclude<GenerationPhase, 'idle'>,
+  { label: string; className: string }
+> = {
+  generating: { label: '生成中', className: 'status-pill status-pill-generating' },
+  busy: { label: '正在生成', className: 'status-pill status-pill-generating' },
+  failed: { label: '生成失败', className: 'status-pill status-pill-failed' },
+};
+
+function getWorkbenchView({
+  overLimit,
+  empty,
+  phase,
+  hasRecord,
+}: {
+  overLimit: boolean;
+  empty: boolean;
+  phase: GenerationPhase;
+  hasRecord: boolean;
+}): {
+  statusLabel: string;
+  statusClass: string;
+  helperText: string;
+  disabledReason: string | null;
+} {
+  const status =
+    phase === 'idle'
+      ? hasRecord
+        ? { label: '已生成', className: 'status-pill status-pill-ready' }
+        : { label: '尚未生成', className: 'status-pill' }
+      : ACTIVE_STATUS[phase];
+
+  let helperText: string;
+  let disabledReason: string | null = null;
+
+  if (overLimit) {
+    helperText = '原文超出上限，请删减后再生成。';
+    disabledReason = '原文超出上限';
+  } else if (empty) {
+    helperText = '先粘贴任务原文，再生成任务计划书。';
+    disabledReason = '请先粘贴任务原文';
+  } else if (phase === 'generating') {
+    helperText = '正在生成任务计划书，通常需要几十秒。';
+    disabledReason = '正在生成中';
+  } else if (phase === 'busy') {
+    helperText = '已有生成任务正在进行，请稍后再试。';
+  } else if (phase === 'failed') {
+    helperText = RETAINED_SOURCE_NOTE;
+  } else if (hasRecord) {
+    helperText = '已生成任务计划书；修改原文后可再次生成。';
+  } else {
+    helperText = '输入已就绪，可以生成任务计划书。';
+  }
+
+  return {
+    statusLabel: status.label,
+    statusClass: status.className,
+    helperText,
+    disabledReason,
+  };
+}
 
 export default function App() {
   const source = useWorkbenchStore((state) => state.source);
   const setSource = useWorkbenchStore((state) => state.setSource);
   const clearSource = useWorkbenchStore((state) => state.clearSource);
+  const record = usePlanStore((state) => state.record);
+  const generation = usePlanStore((state) => state.generation);
+  const interrupted = usePlanStore((state) => state.interrupted);
+  const restore = usePlanStore((state) => state.restore);
+  const generate = usePlanStore((state) => state.generate);
+  const dismissIssue = usePlanStore((state) => state.dismissIssue);
+  const dismissInterrupted = usePlanStore((state) => state.dismissInterrupted);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const sourceState = getSourceState(source);
+  const generating = generation.phase === 'generating';
+  const view = getWorkbenchView({
+    overLimit: sourceState.overLimit,
+    empty: sourceState.empty,
+    phase: generation.phase,
+    hasRecord: record !== null,
+  });
+
+  useEffect(() => {
+    void restore();
+  }, [restore]);
 
   useEffect(() => {
     const guardUnsavedDraft = (event: BeforeUnloadEvent) => {
@@ -29,12 +119,22 @@ export default function App() {
     textareaRef.current?.focus();
   };
 
+  const handleGenerate = () => {
+    void generate(source);
+  };
+
+  const handleBackToEdit = () => {
+    dismissIssue();
+    textareaRef.current?.focus();
+  };
+
   const remaining = MAX_SOURCE_CODE_POINTS - sourceState.codePoints;
-  const helperText = sourceState.overLimit
-    ? `原文超出上限 ${Math.abs(remaining).toLocaleString('zh-CN')} 个字符，请删减后再生成。`
-    : sourceState.empty
-      ? '先粘贴任务原文；生成能力将在下一步接入。'
-      : '输入已就绪；生成能力将在下一步接入。';
+  const priorPlan = record ? (
+    <div className="prior-plan">
+      <p className="prior-plan-label">上次生成的计划书仍保留</p>
+      <PlanDocument record={record} />
+    </div>
+  ) : null;
 
   return (
     <div className="app-shell">
@@ -107,9 +207,15 @@ export default function App() {
           </div>
 
           <div className="source-footer">
-            <p className={sourceState.overLimit ? 'helper-text warning' : 'helper-text'}>{helperText}</p>
-            <button className="generate-button" type="button" disabled title="生成能力将在下一步接入">
-              生成任务计划书
+            <p className={sourceState.overLimit ? 'helper-text warning' : 'helper-text'}>{view.helperText}</p>
+            <button
+              className="generate-button"
+              type="button"
+              onClick={handleGenerate}
+              disabled={view.disabledReason !== null}
+              title={view.disabledReason ?? undefined}
+            >
+              {generating ? '正在生成…' : record ? '再次生成任务计划书' : '生成任务计划书'}
             </button>
           </div>
         </section>
@@ -120,19 +226,52 @@ export default function App() {
               <p className="eyebrow">任务计划书</p>
               <h2 id="document-title">阅读视图</h2>
             </div>
-            <span className="status-pill">尚未生成</span>
+            <span className={view.statusClass} role="status" aria-live="polite">
+              {view.statusLabel}
+            </span>
           </div>
 
-          <div className="empty-document">
-            <div className="empty-sheet" aria-hidden="true">
-              <span />
-              <span />
-              <span />
-              <span />
-            </div>
-            <h3>还没有任务计划书</h3>
-            <p>粘贴任务原文并生成后，阶段、任务、里程碑和验收标准会出现在这里。</p>
-            <span className="empty-caption">从左侧开始</span>
+          <div className="document-body" aria-busy={generating}>
+            {interrupted && generation.phase === 'idle' ? (
+              <GenerationInterrupted onDismiss={dismissInterrupted} />
+            ) : null}
+
+            {generation.phase === 'generating' ? (
+              <GenerationProgress startedAt={generation.startedAt} />
+            ) : generation.phase === 'busy' ? (
+              <>
+                <GenerationBusy
+                  canRetry={sourceState.canGenerate}
+                  onRetry={handleGenerate}
+                  onBack={handleBackToEdit}
+                />
+                {priorPlan}
+              </>
+            ) : generation.phase === 'failed' ? (
+              <>
+                <GenerationError
+                  message={generation.message}
+                  canRetry={sourceState.canGenerate}
+                  onRetry={handleGenerate}
+                  onBack={handleBackToEdit}
+                />
+                {priorPlan}
+              </>
+            ) : record ? (
+              <PlanDocument record={record} />
+            ) : (
+              <div className="empty-document">
+                <div className="empty-sheet" aria-hidden="true">
+                  <span />
+                  <span />
+                  <span />
+                  <span />
+                </div>
+                <h3>还没有任务计划书</h3>
+                <p>粘贴任务原文并生成后，阶段、任务、里程碑和验收标准会出现在这里。</p>
+                <span className="empty-caption">从左侧开始</span>
+              </div>
+            )}
           </div>
         </section>
 

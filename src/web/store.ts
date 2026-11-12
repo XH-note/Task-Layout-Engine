@@ -1,29 +1,15 @@
 import { create } from 'zustand';
 
+import { readStorageValue, writeStorageValue } from './browser-storage';
+
 const DRAFT_KEY = 'task-layout:source-draft';
 
 function readDraft(): string {
-  if (typeof window === 'undefined') return '';
-
-  try {
-    return window.sessionStorage.getItem(DRAFT_KEY) ?? '';
-  } catch {
-    return '';
-  }
+  return readStorageValue('session', DRAFT_KEY) ?? '';
 }
 
 function writeDraft(source: string) {
-  if (typeof window === 'undefined') return;
-
-  try {
-    if (source.length === 0) {
-      window.sessionStorage.removeItem(DRAFT_KEY);
-    } else {
-      window.sessionStorage.setItem(DRAFT_KEY, source);
-    }
-  } catch {
-    // 私密模式或存储被禁用时，草稿只保留在当前页面状态里。
-  }
+  writeStorageValue('session', DRAFT_KEY, source.length === 0 ? null : source);
 }
 
 type WorkbenchState = {
