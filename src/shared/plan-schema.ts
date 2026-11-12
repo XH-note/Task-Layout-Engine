@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-import type { Plan, PlanNode } from './plan';
+import type { Plan, PlanNode, PlanRecord } from './plan';
 
 const prioritySchema = z.enum(['P0', 'P1', 'P2']);
 
@@ -38,4 +38,21 @@ export const planSchema: z.ZodType<Plan> = z.object({
     model: z.string(),
     version: z.string(),
   }),
+});
+
+export const planRecordSchema: z.ZodType<PlanRecord> = z.object({
+  id: z.string().min(1),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+  title: z.string(),
+  plan: planSchema,
+  source: z.string(),
+  model: z.string(),
+  usage: z
+    .object({
+      promptTokens: z.number(),
+      completionTokens: z.number(),
+    })
+    .nullable(),
+  raw: z.unknown().optional(),
 });

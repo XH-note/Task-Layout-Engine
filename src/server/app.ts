@@ -6,6 +6,7 @@ import {
   type Plan,
   type PlanRecord,
 } from '../shared/plan';
+import { migratePlanArchive, preparePlanImport } from '../shared/plan-archive';
 import { planSchema } from '../shared/plan-schema';
 import { resolveCapability, validateSettingsDraft } from '../shared/settings';
 import { AppError, errorEnvelope } from './errors';
@@ -183,6 +184,44 @@ export function buildApp(options: FastifyServerOptions = {}, dependencies: AppDe
 
     return { plans, usage };
   });
+
+  app.get('/api/plans/export', async () => planStore.exportAll());
+
+  app.post(
+    '/api/plans/import',
+    // 备份可能接近 30 MB，默认 1 MiB 的请求体上限会误拒合法导入。
+    { bodyLimit: 32 * 1024 * 1024 },
+    async (request) => {
+      const checked = migratePlanArchive(request.body);
+
+      if (!checked.ok) {
+        throw new AppError(
+          checked.code === 'VERSION_TOO_NEW' ? 'VERSION_TOO_NEW' : 'INVALID_INPUT',
+          400,
+          checked.message,
+        );
+      }
+
+      const existing = await planStore.list();
+      const { records, skipped } = preparePlanImport(
+        checked.archive.plans,
+        existing.map((record) => record.id),
+      );
+
+      const imported = await planStore.importMany(records);
+
+      const plans = (await planStore.list()).map(toPlanListItem);
+
+      return {
+        imported,
+        skipped: skipped.length + (records.length - imported),
+        plans,
+        skippedReasons: skipped.map(
+          (entry) => `${entry.title}：${entry.message}`,
+        ),
+      };
+    },
+  );
 
   app.delete<{ Params: { id: string } }>('/api/plans/:id', async (request, reply) => {
     await planStore.remove(request.params.id);

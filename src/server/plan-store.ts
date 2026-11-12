@@ -6,6 +6,7 @@ import {
   type PlanHistoryUsage,
   type PlanRecord,
 } from '../shared/plan';
+import { PLAN_ARCHIVE_VERSION, type PlanArchive } from '../shared/plan-archive';
 import { writeJsonAtomically } from './atomic-json';
 import { AppError } from './errors';
 import { defaultSettingsDir } from './settings-store';
@@ -108,6 +109,26 @@ export class PlanStore {
   async usage(): Promise<PlanHistoryUsage> {
     await this.ensureLoaded();
     return { count: this.plans.length, bytes: this.bytes };
+  }
+
+  async exportAll(): Promise<PlanArchive> {
+    await this.ensureLoaded();
+    return { schemaVersion: PLAN_ARCHIVE_VERSION, plans: [...this.plans] };
+  }
+
+  /**
+   * 写入导入记录，返回真正落盘的条数。调用方按此计数，
+   * 避免与既有 id 冲突的记录被静默丢弃后仍计入 imported。
+   */
+  async importMany(records: PlanRecord[]): Promise<number> {
+    await this.ensureLoaded();
+    const known = new Set(this.plans.map((plan) => plan.id));
+    const fresh = records.filter((record) => !known.has(record.id));
+
+    if (fresh.length === 0) return 0;
+
+    await this.commit([...fresh, ...this.plans]);
+    return fresh.length;
   }
 
   async create(record: PlanRecord): Promise<PlanRecord> {

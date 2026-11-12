@@ -1,5 +1,7 @@
+import type { Plan } from '../shared/plan';
+import type { PlanArchive } from '../shared/plan-archive';
 import type {
-  Plan,
+  PlanListItem,
   PlanListResponse,
   PlanRecord,
   RegenerateLeafResponse,
@@ -176,5 +178,24 @@ export function updatePlan(
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
     ...(options.keepalive ? { keepalive: true } : {}),
+  });
+}
+
+export interface ImportPlansResponse {
+  imported: number;
+  skipped: number;
+  plans: PlanListItem[];
+  skippedReasons: string[];
+}
+
+export function exportPlanArchive(): Promise<PlanArchive> {
+  return request<PlanArchive>('/api/plans/export');
+}
+
+export function importPlanArchive(payload: unknown): Promise<ImportPlansResponse> {
+  return request<ImportPlansResponse>('/api/plans/import', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
   });
 }

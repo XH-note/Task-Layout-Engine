@@ -385,6 +385,43 @@ button.save-status-error:hover {
   color: var(--warning);
 }
 
+.history-archive {
+  display: flex;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.history-archive .ghost-button {
+  flex: 1;
+  padding: 5px 8px;
+  font-size: 10px;
+}
+
+.history-archive-status {
+  margin: 8px 0 0;
+  padding: 7px 9px;
+  border-radius: 7px;
+  background: var(--accent-soft);
+  color: var(--accent-deep);
+  font-size: 10px;
+  line-height: 1.5;
+}
+
+.history-archive-status.error {
+  background: var(--warning-soft);
+  color: var(--warning);
+}
+
+.history-archive-reasons {
+  margin: 6px 0 0;
+  padding-left: 16px;
+  max-height: 96px;
+  overflow-y: auto;
+  color: var(--ink-soft);
+  font-size: 9px;
+  line-height: 1.5;
+}
+
 .history-menu-footer {
   display: flex;
   align-items: center;
@@ -2204,6 +2241,12 @@ button.save-status-error:hover {
     flex-direction: column;
     gap: 10px;
     padding-block: 14px;
+  }
+
+  .history-menu {
+    right: auto;
+    left: 0;
+    max-width: calc(100vw - 40px);
   }
 
   .workbench {

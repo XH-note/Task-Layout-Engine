@@ -1,11 +1,25 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ChangeEvent } from 'react';
 
 import type { PlanListItem } from '../shared/plan';
+import { exportPlanArchive, importPlanArchive } from './api';
 import { usePlanStore } from './plan-store';
 
 // “接近”上限时提前提示：spec 的 300 条 / 30 MB 的 80%。
 const HISTORY_WARNING_COUNT = 240;
 const HISTORY_WARNING_BYTES = 24 * 1024 * 1024;
+
+type ArchiveNotice = {
+  kind: 'ok' | 'error';
+  text: string;
+  reasons?: string[];
+};
+
+function archiveFileName(now = new Date()): string {
+  const pad = (value: number) => String(value).padStart(2, '0');
+  const date = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+
+  return `任务计划书备份-${date}.json`;
+}
 
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
@@ -23,6 +37,10 @@ function formatUpdatedAt(value: string): string {
     hour: '2-digit',
     minute: '2-digit',
   });
+}
+
+function errorMessage(error: unknown, fallback: string): string {
+  return error instanceof Error && error.message ? error.message : fallback;
 }
 
 export default function HistoryMenu() {
@@ -43,7 +61,10 @@ export default function HistoryMenu() {
   const [clearOpen, setClearOpen] = useState(false);
   const [clearText, setClearText] = useState('');
   const [busy, setBusy] = useState(false);
+  const [archiveBusy, setArchiveBusy] = useState(false);
+  const [archiveNotice, setArchiveNotice] = useState<ArchiveNotice | null>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (!open) return;
@@ -69,6 +90,10 @@ export default function HistoryMenu() {
     if (!open) return;
     void refreshHistory();
   }, [open, refreshHistory]);
+
+  useEffect(() => {
+    if (!open) setArchiveNotice(null);
+  }, [open]);
 
   const search = query.trim();
   const normalizedSearch = search.toLocaleLowerCase();
@@ -108,6 +133,79 @@ export default function HistoryMenu() {
       setClearOpen(false);
       setClearText('');
       setOpen(false);
+    }
+  };
+
+  const handleExport = async () => {
+    if (archiveBusy) return;
+
+    setArchiveBusy(true);
+    setArchiveNotice(null);
+
+    try {
+      const archive = await exportPlanArchive();
+      const blob = new Blob([JSON.stringify(archive, null, 2)], {
+        type: 'application/json',
+      });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+
+      link.href = url;
+      link.download = archiveFileName();
+      link.click();
+      window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+
+      setArchiveNotice({
+        kind: 'ok',
+        text: `已导出 ${archive.plans.length} 条计划。`,
+      });
+    } catch (error) {
+      setArchiveNotice({
+        kind: 'error',
+        text: errorMessage(error, '导出失败。'),
+      });
+    } finally {
+      setArchiveBusy(false);
+    }
+  };
+
+  const handleImportFile = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+
+    if (!file || archiveBusy) return;
+
+    setArchiveBusy(true);
+    setArchiveNotice(null);
+
+    try {
+      let payload: unknown;
+
+      try {
+        payload = JSON.parse(await file.text());
+      } catch {
+        setArchiveNotice({ kind: 'error', text: '文件不是有效的 JSON。' });
+        return;
+      }
+
+      const result = await importPlanArchive(payload);
+      await refreshHistory();
+
+      const skippedText = result.skipped > 0 ? `，跳过 ${result.skipped} 条` : '';
+      setArchiveNotice({
+        kind: 'ok',
+        text: `已导入 ${result.imported} 条计划${skippedText}。`,
+        ...(result.skippedReasons.length > 0
+          ? { reasons: result.skippedReasons }
+          : {}),
+      });
+    } catch (error) {
+      setArchiveNotice({
+        kind: 'error',
+        text: errorMessage(error, '导入失败。'),
+      });
+    } finally {
+      setArchiveBusy(false);
     }
   };
 
@@ -204,6 +302,52 @@ export default function HistoryMenu() {
               })}
             </ul>
           )}
+
+          <div className="history-archive">
+            <button
+              className="ghost-button"
+              type="button"
+              onClick={() => void handleExport()}
+              disabled={archiveBusy || usage.count === 0}
+            >
+              导出全部 JSON
+            </button>
+            <button
+              className="ghost-button"
+              type="button"
+              onClick={() => fileRef.current?.click()}
+              disabled={archiveBusy}
+            >
+              导入 JSON…
+            </button>
+            <input
+              ref={fileRef}
+              type="file"
+              accept="application/json,.json"
+              hidden
+              onChange={(event) => void handleImportFile(event)}
+            />
+          </div>
+
+          {archiveNotice ? (
+            <div
+              className={
+                archiveNotice.kind === 'error'
+                  ? 'history-archive-status error'
+                  : 'history-archive-status'
+              }
+              role={archiveNotice.kind === 'error' ? 'alert' : 'status'}
+            >
+              <span>{archiveNotice.text}</span>
+              {archiveNotice.reasons && archiveNotice.reasons.length > 0 ? (
+                <ul className="history-archive-reasons">
+                  {archiveNotice.reasons.map((reason, index) => (
+                    <li key={`${index}-${reason}`}>{reason}</li>
+                  ))}
+                </ul>
+              ) : null}
+            </div>
+          ) : null}
 
           <div className="history-menu-footer">
             <span className="history-caption">
