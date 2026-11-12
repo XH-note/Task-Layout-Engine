@@ -1,6 +1,7 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 import { MAX_SOURCE_CODE_POINTS, getSourceState } from '../shared/source';
+import SettingsDialog from './SettingsDialog';
 import { useWorkbenchStore } from './store';
 
 export default function App() {
@@ -8,6 +9,7 @@ export default function App() {
   const setSource = useWorkbenchStore((state) => state.setSource);
   const clearSource = useWorkbenchStore((state) => state.clearSource);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const sourceState = getSourceState(source);
 
   useEffect(() => {
@@ -54,7 +56,7 @@ export default function App() {
               ▾
             </span>
           </button>
-          <button className="quiet-button" type="button" disabled title="设置将在后续切片接入">
+          <button className="quiet-button" type="button" onClick={() => setSettingsOpen(true)}>
             设置
           </button>
           <button className="export-button" type="button" disabled title="导出将在后续切片接入">
@@ -160,6 +162,8 @@ export default function App() {
         <span>数据只保存在这台机器</span>
         <span className="footer-version">v0.1</span>
       </footer>
+
+      <SettingsDialog open={settingsOpen} onClose={() => setSettingsOpen(false)} />
     </div>
   );
 }
