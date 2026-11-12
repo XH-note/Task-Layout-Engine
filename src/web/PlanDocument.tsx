@@ -5,6 +5,7 @@ import {
   computePlanSummary,
   formatGeneratedAt,
   formatHours,
+  formatPlanSource,
   formatWeek,
   formatWeekRange,
 } from '../shared/summary';
@@ -106,12 +107,16 @@ export default function PlanDocument({
         </div>
         <dl className="plan-meta">
           <div>
-            <dt>阶段数</dt>
-            <dd>{summary.stageCount}</dd>
+            <dt>生成时间</dt>
+            <dd>{formatGeneratedAt(plan.meta.generatedAt)}</dd>
           </div>
           <div>
-            <dt>叶子任务</dt>
-            <dd>{summary.leafCount}</dd>
+            <dt>来源</dt>
+            <dd>{formatPlanSource(plan.meta.source)}</dd>
+          </div>
+          <div>
+            <dt>版本</dt>
+            <dd>{plan.meta.version || '未记录'}</dd>
           </div>
           <div>
             <dt>总工时</dt>
@@ -124,8 +129,12 @@ export default function PlanDocument({
             </dd>
           </div>
           <div>
-            <dt>生成时间</dt>
-            <dd>{formatGeneratedAt(plan.meta.generatedAt)}</dd>
+            <dt>阶段数</dt>
+            <dd>{summary.stageCount}</dd>
+          </div>
+          <div>
+            <dt>叶子任务</dt>
+            <dd>{summary.leafCount}</dd>
           </div>
         </dl>
       </header>

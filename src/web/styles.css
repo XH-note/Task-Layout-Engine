@@ -18,7 +18,7 @@
   --caution-soft: rgba(194, 145, 63, 0.16);
   --shadow: 0 12px 34px rgba(69, 57, 39, 0.07);
   --radius: 14px;
-  font-family: "Noto Sans SC", "Source Han Sans SC", "Microsoft YaHei", "PingFang SC", "Hiragino Sans GB", sans-serif;
+  font-family: "Noto Sans SC Variable", "Noto Sans SC", "Source Han Sans SC", "Microsoft YaHei", "PingFang SC", "Hiragino Sans GB", sans-serif;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
 }
@@ -2054,6 +2054,132 @@ button.save-status-error:hover {
 .ghost-button:disabled,
 .primary-button:disabled {
   opacity: 0.55;
+}
+
+.export-wrap {
+  position: relative;
+}
+
+.export-menu {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 40;
+  width: 300px;
+  padding: 14px;
+  border: 1px solid var(--line-strong);
+  border-radius: 14px;
+  background: var(--panel);
+  box-shadow: 0 18px 48px rgba(31, 42, 36, 0.18);
+}
+
+.export-menu-heading {
+  margin: 0 0 8px;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+}
+
+.export-action {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  padding: 10px 11px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--panel-soft);
+  color: var(--ink);
+  font-size: 12px;
+  text-align: left;
+}
+
+.export-action:hover {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.export-action small,
+.export-option small {
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.5;
+}
+
+.export-divider {
+  height: 1px;
+  margin: 12px 0;
+  background: var(--line);
+}
+
+.export-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  padding: 7px 4px;
+  border-radius: 7px;
+  cursor: pointer;
+}
+
+.export-option:hover {
+  background: var(--panel-soft);
+}
+
+.export-option.disabled {
+  cursor: not-allowed;
+  opacity: 0.52;
+}
+
+.export-option input {
+  margin-top: 3px;
+  accent-color: var(--accent);
+}
+
+.export-option span {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 12px;
+}
+
+.export-print {
+  width: 100%;
+  min-height: 36px;
+  margin-top: 12px;
+  padding: 0 12px;
+  border-radius: 8px;
+  font-size: 12px;
+}
+
+.export-hint {
+  margin: 9px 0 0;
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.6;
+}
+
+.export-status {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 41;
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--panel);
+  color: var(--accent);
+  box-shadow: var(--shadow);
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+/* 一页总览只用于打印，屏幕上不再重复渲染整份计划书。 */
+@media screen {
+  .print-overview {
+    display: none;
+  }
 }
 
 @media (max-width: 1180px) {

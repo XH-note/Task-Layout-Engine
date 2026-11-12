@@ -11,6 +11,7 @@ import {
   computeStageSummary,
   formatGeneratedAt,
   formatHours,
+  formatPlanSource,
   formatWeek,
   formatWeekRange,
 } from './summary';
@@ -161,6 +162,20 @@ describe('formatHours', () => {
 describe('formatGeneratedAt', () => {
   it('does not invent a time for an unparsable value', () => {
     expect(formatGeneratedAt('not-a-date')).toBe('未记录');
+  });
+});
+
+describe('formatPlanSource', () => {
+  it('translates the internal paste marker', () => {
+    expect(formatPlanSource('paste')).toBe('粘贴原文');
+  });
+
+  it('keeps an already readable source as-is', () => {
+    expect(formatPlanSource('邮件原文')).toBe('邮件原文');
+  });
+
+  it('reports a missing source instead of rendering blank', () => {
+    expect(formatPlanSource('   ')).toBe('未记录');
   });
 });
 

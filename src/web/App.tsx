@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 
 import { MAX_SOURCE_CODE_POINTS, getSourceState } from '../shared/source';
+import { computePlanSummary } from '../shared/summary';
 import {
   GenerationBusy,
   GenerationError,
@@ -9,9 +10,11 @@ import {
   GenerationProgress,
   RETAINED_SOURCE_NOTE,
 } from './GenerationFeedback';
+import ExportMenu, { OVERVIEW_MIN_LEAVES, type PrintLayout } from './ExportMenu';
 import HistoryMenu from './HistoryMenu';
 import Inspector from './Inspector';
 import PlanDocument from './PlanDocument';
+import PlanOverview from './PlanOverview';
 import SettingsDialog from './SettingsDialog';
 import { usePlanStore } from './plan-store';
 import type { GenerationPhase } from './plan-store';
@@ -102,7 +105,9 @@ export default function App() {
   const dismissNotice = usePlanStore((state) => state.dismissNotice);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [printLayout, setPrintLayout] = useState<PrintLayout>('document');
   const sourceState = getSourceState(source);
+  const leafCount = record ? computePlanSummary(record.plan).leafCount : 0;
   const generating = generation.phase === 'generating';
   const view = getWorkbenchView({
     overLimit: sourceState.overLimit,
@@ -173,10 +178,25 @@ export default function App() {
     textareaRef.current?.focus();
   };
 
+  const handlePrint = () => {
+    if (!record) return;
+
+    // 等字体就绪再打印，否则首屏可能回退到系统字体。
+    void document.fonts.ready.then(() => {
+      window.print();
+    });
+  };
+
   const remaining = MAX_SOURCE_CODE_POINTS - sourceState.codePoints;
+  // 版式跟随当前计划书：叶子任务不足阈值时回落到文档式，避免屏幕与打印不一致。
+  const overviewAvailable = leafCount > OVERVIEW_MIN_LEAVES;
+  const layout: PrintLayout =
+    printLayout === 'overview' && overviewAvailable ? 'overview' : 'document';
+  const printOverview = record && layout === 'overview' ? <PlanOverview record={record} /> : null;
   const priorPlan = record ? (
     <div className="prior-plan">
       <p className="prior-plan-label">上次生成的计划书仍保留</p>
+      {printOverview}
       <PlanDocument
         record={record}
         selectedNodeId={selectedNodeId}
@@ -234,9 +254,13 @@ export default function App() {
           <button className="quiet-button" type="button" onClick={() => setSettingsOpen(true)}>
             设置
           </button>
-          <button className="export-button" type="button" disabled title="导出将在后续切片接入">
-            导出
-          </button>
+          <ExportMenu
+            record={record}
+            leafCount={leafCount}
+            layout={layout}
+            onLayoutChange={setPrintLayout}
+            onPrint={handlePrint}
+          />
         </nav>
       </header>
 
@@ -341,13 +365,16 @@ export default function App() {
                 {priorPlan}
               </>
             ) : record ? (
-              <PlanDocument
-                record={record}
-                selectedNodeId={selectedNodeId}
-                onSelectNode={selectNode}
-                onRenamePlan={renamePlan}
-                onMoveNode={moveNode}
-              />
+              <>
+                {printOverview}
+                <PlanDocument
+                  record={record}
+                  selectedNodeId={selectedNodeId}
+                  onSelectNode={selectNode}
+                  onRenamePlan={renamePlan}
+                  onMoveNode={moveNode}
+                />
+              </>
             ) : (
               <div className="empty-document">
                 <div className="empty-sheet" aria-hidden="true">

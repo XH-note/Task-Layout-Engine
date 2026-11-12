@@ -124,3 +124,15 @@ export function formatGeneratedAt(value: string): string {
     hour12: false,
   });
 }
+
+const SOURCE_LABELS: Record<string, string> = {
+  paste: '粘贴原文',
+};
+
+/** 把内部的来源标记换成文档里可读的说明。 */
+export function formatPlanSource(source: string): string {
+  const trimmed = source.trim();
+  if (!trimmed) return '未记录';
+
+  return SOURCE_LABELS[trimmed] ?? trimmed;
+}

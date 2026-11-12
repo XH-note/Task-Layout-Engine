@@ -1,0 +1,356 @@
+/* 打印专用版式：只在打印/另存为 PDF 时生效，避免与屏幕样式互相污染。 */
+
+@page {
+  size: A4 portrait;
+  margin: 17mm 15mm 15mm;
+
+  @bottom-left {
+    content: "任务计划书 · 内部讨论稿";
+    color: #555;
+    font-family: "Noto Sans SC Variable", "Noto Sans SC", "Microsoft YaHei", sans-serif;
+    font-size: 8pt;
+  }
+
+  @bottom-right {
+    content: "第 " counter(page) " / " counter(pages) " 页";
+    color: #555;
+    font-family: "Noto Sans SC Variable", "Noto Sans SC", "Microsoft YaHei", sans-serif;
+    font-size: 8pt;
+  }
+}
+
+@media print {
+  html,
+  body {
+    min-width: 0;
+    background: #fff;
+  }
+
+  body {
+    color: #111;
+    font-family: "Noto Sans SC Variable", "Noto Sans SC", "Source Han Sans SC", "Microsoft YaHei", sans-serif;
+    font-size: 10.5pt;
+    line-height: 1.55;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  .topbar,
+  .source-panel,
+  .inspector-panel,
+  .app-footer,
+  .panel-heading,
+  .history-wrap,
+  .export-wrap,
+  .generation-progress,
+  .generation-interrupted,
+  .generation-error,
+  .generation-busy,
+  .prior-plan-label {
+    display: none !important;
+  }
+
+  .app-shell {
+    display: block;
+    min-height: 0;
+  }
+
+  .workbench {
+    display: block;
+    width: auto;
+    max-width: none;
+    margin: 0;
+    padding: 0;
+  }
+
+  .panel,
+  .document-panel {
+    height: auto;
+    min-height: 0;
+    overflow: visible;
+    border: 0;
+    border-radius: 0;
+    background: #fff;
+    box-shadow: none;
+  }
+
+  .document-panel {
+    display: block;
+    padding: 0;
+  }
+
+  .document-body {
+    display: block;
+    padding: 0;
+    overflow: visible;
+  }
+
+  .prior-plan {
+    display: block;
+  }
+
+  .plan-document {
+    padding: 0;
+    color: #111;
+    font-size: 10.5pt;
+    line-height: 1.55;
+    overflow-wrap: break-word;
+    word-break: normal;
+    line-break: strict;
+    text-align: left;
+  }
+
+  .plan-document-heading {
+    padding-bottom: 10pt;
+    border-bottom: 1pt solid #bbb;
+    break-after: avoid;
+    page-break-after: avoid;
+  }
+
+  .plan-document-heading h3,
+  .plan-title-input {
+    font-family: "Noto Sans SC Variable", "Noto Sans SC", "Microsoft YaHei", sans-serif;
+    font-size: 19pt;
+    font-weight: 700;
+    line-height: 1.3;
+    letter-spacing: 0.01em;
+  }
+
+  .plan-title-input {
+    padding: 0;
+    border: 0;
+    background: transparent;
+  }
+
+  .title-edit-button {
+    display: none;
+  }
+
+  .plan-meta {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 7pt 14pt;
+    margin-top: 9pt;
+  }
+
+  .plan-meta dt {
+    color: #666;
+    font-size: 8pt;
+    letter-spacing: 0.06em;
+  }
+
+  .plan-meta dd {
+    margin-top: 1pt;
+    font-size: 9pt;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .plan-section {
+    margin-top: 13pt;
+  }
+
+  .plan-section h4 {
+    margin-bottom: 4pt;
+    padding-bottom: 2pt;
+    border-bottom: 0.6pt solid #d6d6d6;
+    color: #222;
+    font-size: 11pt;
+    letter-spacing: 0.04em;
+    break-after: avoid;
+    page-break-after: avoid;
+  }
+
+  .plan-section p,
+  .plan-list {
+    font-size: 10.5pt;
+    line-height: 1.55;
+  }
+
+  .plan-list {
+    margin: 0;
+    padding-left: 16pt;
+  }
+
+  .plan-tree {
+    gap: 10pt;
+    margin-top: 6pt;
+  }
+
+  .plan-stage {
+    overflow: visible;
+    border: 0;
+    border-radius: 0;
+  }
+
+  .plan-stage-heading {
+    margin: 0;
+    padding: 7pt 0 4pt;
+    border-bottom: 0.8pt solid #999;
+    border-radius: 0;
+    background: transparent;
+    cursor: default;
+    break-after: avoid;
+    page-break-after: avoid;
+  }
+
+  .plan-stage-heading::before {
+    display: none;
+  }
+
+  .plan-stage-heading h5 {
+    font-family: "Noto Sans SC Variable", "Noto Sans SC", "Microsoft YaHei", sans-serif;
+    font-size: 12.5pt;
+    font-weight: 700;
+  }
+
+  .plan-stage-summary {
+    color: #555;
+    font-size: 8.5pt;
+  }
+
+  .plan-stage-list {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  /* 保留嵌套缩进与虚线，打印出来仍能看出任务层级。 */
+  .plan-children {
+    margin: 0 0 0 6pt;
+    padding-left: 10pt;
+    border-left: 0.5pt dashed #cfcfcf;
+    list-style: none;
+  }
+
+  .plan-row {
+    margin: 0;
+    padding: 5pt 0;
+    border-bottom: 0.5pt solid #e3e3e3;
+    border-radius: 0;
+    background: transparent;
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  .plan-row:hover,
+  .plan-row.selected {
+    background: transparent;
+    box-shadow: none;
+  }
+
+  .plan-leaf .plan-row {
+    padding-left: 0;
+  }
+
+  .plan-number {
+    min-width: 28pt;
+    color: #555;
+    font-size: 9pt;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .plan-node-title {
+    font-size: 10.5pt;
+    font-weight: 600;
+  }
+
+  .plan-node-badges {
+    gap: 4pt;
+  }
+
+  .plan-priority,
+  .plan-hours {
+    border: 0;
+    background: transparent;
+    font-size: 8.5pt;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .plan-deps {
+    color: #555;
+    font-size: 8.5pt;
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* 任务说明与验收属于正文，按 10.5pt / 1.55 排。 */
+  .plan-desc,
+  .plan-acceptance {
+    color: #222;
+    font-size: 10.5pt;
+    line-height: 1.55;
+  }
+
+  .plan-field-label {
+    color: #666;
+  }
+
+  .plan-table {
+    font-size: 9.5pt;
+  }
+
+  .plan-table th,
+  .plan-table td {
+    padding: 3pt 6pt;
+    border-bottom: 0.5pt solid #ddd;
+  }
+
+  .plan-empty {
+    color: #666;
+    font-size: 9.5pt;
+  }
+
+  .print-overview {
+    display: block;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    background: #fff;
+    color: #111;
+    break-after: page;
+    page-break-after: always;
+  }
+
+  .print-overview-heading h2 {
+    font-family: "Noto Sans SC Variable", "Noto Sans SC", "Microsoft YaHei", sans-serif;
+    font-size: 16pt;
+  }
+
+  .print-overview-heading > p:last-child {
+    margin-top: 4pt;
+    color: #555;
+    font-size: 8.5pt;
+  }
+
+  .print-overview-table {
+    margin-top: 9pt;
+    font-size: 8.5pt;
+  }
+
+  .print-overview-table th,
+  .print-overview-table td {
+    padding: 2.4pt 5pt;
+    border-bottom: 0.5pt solid #ddd;
+  }
+
+  .print-overview-table thead th {
+    color: #555;
+    font-size: 7.5pt;
+  }
+
+  .print-overview-stage th {
+    padding-top: 6pt;
+    color: #222;
+    font-size: 8.5pt;
+  }
+
+  .print-overview-note {
+    margin-top: 8pt;
+    color: #666;
+    font-size: 8pt;
+  }
+
+  .plan-stage,
+  .plan-section {
+    break-inside: auto;
+  }
+}
