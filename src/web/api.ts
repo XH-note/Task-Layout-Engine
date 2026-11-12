@@ -1,4 +1,9 @@
-import type { Plan, PlanListResponse, PlanRecord } from '../shared/plan';
+import type {
+  Plan,
+  PlanListResponse,
+  PlanRecord,
+  RegenerateLeafResponse,
+} from '../shared/plan';
 import type {
   PublicSettings,
   SettingsDraft,
@@ -131,6 +136,20 @@ export function generatePlan(
 
 export function getPlan(id: string): Promise<PlanRecord> {
   return request<PlanRecord>(`/api/plans/${encodeURIComponent(id)}`);
+}
+
+export function regenerateLeaf(
+  planId: string,
+  nodeId: string,
+  signal?: AbortSignal,
+): Promise<RegenerateLeafResponse> {
+  return request<RegenerateLeafResponse>(
+    `/api/plans/${encodeURIComponent(planId)}/nodes/${encodeURIComponent(nodeId)}/regenerate`,
+    {
+      method: 'POST',
+      ...(signal ? { signal } : {}),
+    },
+  );
 }
 
 export function listPlans(): Promise<PlanListResponse> {

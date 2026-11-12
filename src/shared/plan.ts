@@ -62,6 +62,11 @@ export interface PlanListResponse {
   usage: PlanHistoryUsage;
 }
 
+export interface RegenerateLeafResponse {
+  record: PlanRecord;
+  warning?: string;
+}
+
 export function comparePlansByUpdatedAt(
   a: { updatedAt: string },
   b: { updatedAt: string },
@@ -914,4 +919,100 @@ export function updatePlanNode(
   };
 
   return walk(nodes);
+}
+
+export interface RegeneratedLeafFields {
+  title: string;
+  desc?: string;
+  priority?: Priority;
+  estimateHours?: number;
+  deps?: string[];
+  acceptance?: string;
+}
+
+export interface ApplyLeafRegenerationResult {
+  plan: Plan;
+  depsKept: boolean;
+  issues: PlanIssue[];
+}
+
+function isDependencyIssue(issue: PlanIssue): boolean {
+  return issue.path === 'deps' || issue.path.includes('.deps');
+}
+
+/**
+ * Replaces a single leaf's editable fields. If the new dependencies are
+ * invalid (missing, non-leaf, self-referencing, or cyclic), the original
+ * dependencies are restored instead of rejecting the whole regeneration.
+ */
+export function applyLeafRegeneration(
+  plan: Plan,
+  nodeId: string,
+  fields: RegeneratedLeafFields,
+): ApplyLeafRegenerationResult {
+  const node = findPlanNode(plan.nodes, nodeId);
+
+  if (!node) {
+    return {
+      plan,
+      depsKept: false,
+      issues: [{ path: 'nodes', message: '找不到要重新生成的节点。' }],
+    };
+  }
+
+  if (isGroup(node)) {
+    return {
+      plan,
+      depsKept: false,
+      issues: [{ path: 'nodes', message: '只能重新生成叶子任务。' }],
+    };
+  }
+
+  const originalDeps = node.deps ?? [];
+  const patch: Partial<PlanNode> = { title: fields.title.trim() };
+
+  if (fields.desc !== undefined) {
+    patch.desc = fields.desc.trim() || undefined;
+  }
+
+  if (fields.priority !== undefined) {
+    patch.priority = fields.priority;
+  }
+
+  if (fields.estimateHours !== undefined) {
+    patch.estimateHours = fields.estimateHours;
+  }
+
+  if (fields.deps !== undefined) {
+    patch.deps = fields.deps.length > 0 ? fields.deps : undefined;
+  }
+
+  if (fields.acceptance !== undefined) {
+    patch.acceptance = fields.acceptance.trim();
+  }
+
+  const candidateNodes = updatePlanNode(plan.nodes, nodeId, patch);
+  const candidatePlan: Plan = { ...plan, nodes: candidateNodes };
+  const candidateIssues = validatePlan(candidatePlan);
+
+  if (!candidateIssues.some(isDependencyIssue)) {
+    return {
+      plan: candidatePlan,
+      depsKept: false,
+      issues: candidateIssues,
+    };
+  }
+
+  const fallbackNodes = updatePlanNode(plan.nodes, nodeId, {
+    ...patch,
+    deps: originalDeps.length > 0 ? originalDeps : undefined,
+  });
+  const fallbackPlan: Plan = { ...plan, nodes: fallbackNodes };
+  const fallbackIssues = validatePlan(fallbackPlan);
+
+  return {
+    plan: fallbackPlan,
+    depsKept: true,
+    issues: fallbackIssues,
+  };
 }

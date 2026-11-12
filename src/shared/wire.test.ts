@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   extractJsonCandidate,
+  parseWireNodeContent,
   parseWirePlanContent,
 } from './wire';
 import { cloneWirePlan, findWireNode, validWireJson, validWirePlan } from '../test-support/wire-plan';
@@ -69,5 +70,65 @@ describe('parseWirePlanContent', () => {
     const result = parseWirePlanContent(JSON.stringify(validWirePlan()));
 
     expect(result.ok).toBe(true);
+  });
+});
+
+describe('parseWireNodeContent', () => {
+  it('parses a single leaf and rejects nested children', () => {
+    const wire = cloneWirePlan();
+    const leaf = findWireNode(wire, 'n2');
+    expect(leaf).toBeDefined();
+    if (!leaf) return;
+
+    const valid = parseWireNodeContent(JSON.stringify({ ...leaf, children: [] }));
+    expect(valid.ok).toBe(true);
+
+    const nested = parseWireNodeContent(
+      JSON.stringify({ ...leaf, children: [{ ...leaf, key: 'child' }] }),
+    );
+    expect(nested.ok).toBe(false);
+    if (nested.ok) return;
+    expect(nested.issues).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ path: 'children' }),
+      ]),
+    );
+  });
+
+  it('reports the missing field path for a malformed leaf', () => {
+    const wire = cloneWirePlan();
+    const leaf = findWireNode(wire, 'n2');
+    expect(leaf).toBeDefined();
+    if (!leaf) return;
+
+    const { acceptance: _acceptance, ...rest } = leaf;
+    const result = parseWireNodeContent(JSON.stringify(rest));
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.issues).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ path: 'acceptance' }),
+      ]),
+    );
+  });
+
+  it('rejects an empty regenerated priority', () => {
+    const wire = cloneWirePlan();
+    const leaf = findWireNode(wire, 'n2');
+    expect(leaf).toBeDefined();
+    if (!leaf) return;
+
+    const result = parseWireNodeContent(
+      JSON.stringify({ ...leaf, priority: '', children: [] }),
+    );
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.issues).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ path: 'priority' }),
+      ]),
+    );
   });
 });

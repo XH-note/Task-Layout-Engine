@@ -91,6 +91,29 @@ describe('PlanStore', () => {
     await expect(new PlanStore(dataDir).get('kept')).resolves.toEqual(updated);
   });
 
+  it('rejects an update based on a stale snapshot', async () => {
+    const store = new PlanStore(dataDir);
+    const created = await store.create(record('kept'));
+    const updated: PlanRecord = {
+      ...created,
+      title: '更新后的标题',
+      updatedAt: '2026-11-12T10:00:00.000Z',
+      plan: { ...created.plan, title: '更新后的标题' },
+    };
+    await store.update(updated);
+
+    const failure = await store
+      .update(
+        { ...updated, title: '过期标题' },
+        { expectedUpdatedAt: created.updatedAt },
+      )
+      .catch((error: unknown) => error);
+
+    expect(failure).toBeInstanceOf(AppError);
+    expect((failure as AppError).code).toBe('CONFLICT');
+    await expect(store.get('kept')).resolves.toEqual(updated);
+  });
+
   it('rejects updating a record that does not exist', async () => {
     const store = new PlanStore(dataDir);
     const failure = await store

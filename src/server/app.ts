@@ -150,6 +150,32 @@ export function buildApp(options: FastifyServerOptions = {}, dependencies: AppDe
     }
   });
 
+  app.post<{ Params: { id: string; nodeId: string } }>(
+    '/api/plans/:id/nodes/:nodeId/regenerate',
+    async (request, reply) => {
+      const controller = new AbortController();
+      const abortIfDisconnected = () => {
+        if (!reply.raw.writableEnded) controller.abort();
+      };
+
+      request.raw.once('aborted', abortIfDisconnected);
+      reply.raw.once('close', abortIfDisconnected);
+
+      try {
+        const result = await generation.regenerateLeaf(
+          request.params.id,
+          request.params.nodeId,
+          { signal: controller.signal },
+        );
+
+        return reply.code(200).send(result);
+      } finally {
+        request.raw.off('aborted', abortIfDisconnected);
+        reply.raw.off('close', abortIfDisconnected);
+      }
+    },
+  );
+
   app.get('/api/plans', async () => {
     const records = await planStore.list();
     const usage = await planStore.usage();

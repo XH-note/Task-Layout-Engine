@@ -44,6 +44,16 @@ const wireNodeSchema: z.ZodType<WireNode> = z.lazy(() =>
   }),
 );
 
+const wireLeafNodeSchema = wireNodeSchema
+  .refine((node) => node.children.length === 0, {
+    path: ['children'],
+    message: '单叶子重生成只能返回一个叶子任务，children 必须是空数组。',
+  })
+  .refine((node) => node.priority !== '', {
+    path: ['priority'],
+    message: '重新生成的叶子必须填写优先级 P0/P1/P2。',
+  });
+
 const wirePlanSchema: z.ZodType<WirePlan> = z.object({
   title: z.string(),
   goal: z.string(),
@@ -84,6 +94,18 @@ export const WIRE_NODE_JSON_SCHEMA = {
   additionalProperties: false,
 } as const;
 
+export const WIRE_LEAF_JSON_SCHEMA = {
+  ...WIRE_NODE_JSON_SCHEMA,
+  properties: {
+    ...WIRE_NODE_JSON_SCHEMA.properties,
+    children: {
+      type: 'array',
+      maxItems: 0,
+      items: { type: 'object' },
+    },
+  },
+} as const;
+
 export const WIRE_PLAN_JSON_SCHEMA = {
   type: 'object',
   properties: {
@@ -117,6 +139,14 @@ export type WireParseResult =
   | { ok: true; wire: WirePlan; raw: unknown; repaired: boolean }
   | { ok: false; issues: PlanIssue[] };
 
+export type WireNodeParseResult =
+  | { ok: true; wire: WireNode; raw: unknown; repaired: boolean }
+  | { ok: false; issues: PlanIssue[] };
+
+type JsonObjectResult =
+  | { ok: true; raw: unknown; repaired: boolean }
+  | { ok: false; issues: PlanIssue[] };
+
 function formatZodPath(path: readonly PropertyKey[]): string {
   let formatted = '';
 
@@ -145,7 +175,7 @@ export function extractJsonCandidate(content: string): string | null {
   return body.slice(start, end + 1);
 }
 
-export function parseWirePlanContent(content: string): WireParseResult {
+function parseJsonObject(content: string): JsonObjectResult {
   const candidate = extractJsonCandidate(content);
 
   if (!candidate) {
@@ -155,16 +185,11 @@ export function parseWirePlanContent(content: string): WireParseResult {
     };
   }
 
-  let raw: unknown;
-  let repaired = false;
-
   try {
-    raw = JSON.parse(candidate);
+    return { ok: true, raw: JSON.parse(candidate), repaired: false };
   } catch {
-    repaired = true;
-
     try {
-      raw = JSON.parse(jsonrepair(candidate));
+      return { ok: true, raw: JSON.parse(jsonrepair(candidate)), repaired: true };
     } catch {
       return {
         ok: false,
@@ -174,8 +199,13 @@ export function parseWirePlanContent(content: string): WireParseResult {
       };
     }
   }
+}
 
-  const parsed = wirePlanSchema.safeParse(raw);
+export function parseWirePlanContent(content: string): WireParseResult {
+  const parsedJson = parseJsonObject(content);
+  if (!parsedJson.ok) return parsedJson;
+
+  const parsed = wirePlanSchema.safeParse(parsedJson.raw);
 
   if (!parsed.success) {
     return {
@@ -187,5 +217,34 @@ export function parseWirePlanContent(content: string): WireParseResult {
     };
   }
 
-  return { ok: true, wire: parsed.data, raw, repaired };
+  return {
+    ok: true,
+    wire: parsed.data,
+    raw: parsedJson.raw,
+    repaired: parsedJson.repaired,
+  };
+}
+
+export function parseWireNodeContent(content: string): WireNodeParseResult {
+  const parsedJson = parseJsonObject(content);
+  if (!parsedJson.ok) return parsedJson;
+
+  const parsed = wireLeafNodeSchema.safeParse(parsedJson.raw);
+
+  if (!parsed.success) {
+    return {
+      ok: false,
+      issues: parsed.error.issues.map((issue) => ({
+        path: formatZodPath(issue.path),
+        message: issue.message,
+      })),
+    };
+  }
+
+  return {
+    ok: true,
+    wire: parsed.data,
+    raw: parsedJson.raw,
+    repaired: parsedJson.repaired,
+  };
 }

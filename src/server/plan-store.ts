@@ -116,12 +116,27 @@ export class PlanStore {
     return record;
   }
 
-  async update(record: PlanRecord): Promise<PlanRecord> {
+  async update(
+    record: PlanRecord,
+    options: { expectedUpdatedAt?: string } = {},
+  ): Promise<PlanRecord> {
     await this.ensureLoaded();
 
     const index = this.plans.findIndex((plan) => plan.id === record.id);
     if (index === -1) {
       throw new AppError('NOT_FOUND', 404, '找不到该任务计划书。');
+    }
+
+    const current = this.plans[index]!;
+    if (
+      options.expectedUpdatedAt !== undefined &&
+      current.updatedAt !== options.expectedUpdatedAt
+    ) {
+      throw new AppError(
+        'CONFLICT',
+        409,
+        '计划已被其他操作修改，请重新尝试。',
+      );
     }
 
     const next = [...this.plans];

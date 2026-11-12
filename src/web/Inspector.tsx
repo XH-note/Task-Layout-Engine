@@ -39,6 +39,9 @@ export default function Inspector() {
   const deleteNode = usePlanStore((state) => state.deleteNode);
   const saveState = usePlanStore((state) => state.saveState);
   const editError = usePlanStore((state) => state.editError);
+  const regeneratingNodeId = usePlanStore((state) => state.regeneratingNodeId);
+  const regenerateError = usePlanStore((state) => state.regenerateError);
+  const regenerateNode = usePlanStore((state) => state.regenerateNode);
   const [pendingDelete, setPendingDelete] = useState<{
     nodeId: string;
     title: string;
@@ -68,12 +71,14 @@ export default function Inspector() {
   );
   const error =
     editError ??
+    regenerateError ??
     (saveState.status === 'error' || saveState.status === 'invalid'
       ? saveState.message
       : null);
 
   const patch = (value: Partial<PlanNode>) => updateNode(node.id, value);
   const canAddChild = !leaf && path.length < MAX_TASK_DEPTH;
+  const editingLocked = regeneratingNodeId !== null;
 
   const requestDelete = () => {
     const preview = removePlanNode(record.plan.nodes, node.id);
@@ -117,6 +122,7 @@ export default function Inspector() {
           className="text-input"
           value={node.title}
           readOnly={stage}
+          disabled={editingLocked}
           onChange={(event) => patch({ title: event.target.value })}
         />
         {stage ? (
@@ -130,6 +136,7 @@ export default function Inspector() {
           className="inspector-textarea"
           rows={3}
           value={node.desc ?? ''}
+          disabled={editingLocked}
           onChange={(event) =>
             patch({ desc: event.target.value === '' ? undefined : event.target.value })
           }
@@ -144,6 +151,7 @@ export default function Inspector() {
               <select
                 className="select-input"
                 value={node.priority ?? ''}
+                disabled={editingLocked}
                 onChange={(event) => {
                   patch({ priority: event.target.value as Priority });
                 }}
@@ -170,6 +178,7 @@ export default function Inspector() {
                 max={8}
                 step={0.5}
                 value={node.estimateHours ?? ''}
+                disabled={editingLocked}
                 onChange={(event) =>
                   patch({
                     estimateHours:
@@ -188,6 +197,7 @@ export default function Inspector() {
               className="inspector-textarea"
               rows={3}
               value={node.acceptance ?? ''}
+              disabled={editingLocked}
               onChange={(event) =>
                 patch({
                   acceptance:
@@ -216,6 +226,7 @@ export default function Inspector() {
                         className="dependency-remove"
                         type="button"
                         aria-label={`移除依赖 ${label}`}
+                        disabled={editingLocked}
                         onClick={() =>
                           patch({
                             deps: dependencies.filter(
@@ -234,6 +245,7 @@ export default function Inspector() {
             <select
               className="select-input"
               value=""
+              disabled={editingLocked}
               onChange={(event) => {
                 const dependencyId = event.target.value;
                 if (!dependencyId) return;
@@ -259,19 +271,41 @@ export default function Inspector() {
       )}
 
       <div className="inspector-actions">
+        {leaf ? (
+          <button
+            className="secondary-button"
+            type="button"
+            disabled={regeneratingNodeId !== null}
+            onClick={() => void regenerateNode(node.id)}
+          >
+            {regeneratingNodeId !== null ? '生成中…' : '重新生成'}
+          </button>
+        ) : null}
         {canAddChild ? (
           <button
             className="secondary-button"
             type="button"
+            disabled={editingLocked}
             onClick={() => addChildNode(node.id)}
           >
             加叶子任务
           </button>
         ) : null}
-        <button className="danger-button" type="button" onClick={requestDelete}>
+        <button
+          className="danger-button"
+          type="button"
+          disabled={editingLocked}
+          onClick={requestDelete}
+        >
           删除
         </button>
       </div>
+
+      {leaf ? (
+        <p className="inspector-hint">
+          重新生成只替换当前叶子内容，任务 id、位置和编号保持不变。
+        </p>
+      ) : null}
 
       <p className="inspector-hint">
         修改会在停止输入 {SAVE_DEBOUNCE_MS / 1000} 秒后自动保存。

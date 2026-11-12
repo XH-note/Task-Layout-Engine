@@ -24,6 +24,7 @@ import {
   generatePlan,
   getPlan,
   listPlans,
+  regenerateLeaf as regenerateLeafRequest,
   updatePlan,
 } from './api';
 import { readStorageValue, writeStorageValue } from './browser-storage';
@@ -57,6 +58,8 @@ type PlanState = {
   selectedNodeId: string | null;
   saveState: SaveState;
   editError: string | null;
+  regeneratingNodeId: string | null;
+  regenerateError: string | null;
   history: PlanListItem[];
   usage: PlanHistoryUsage;
   historyLoading: boolean;
@@ -77,6 +80,7 @@ type PlanState = {
     id: string,
   ) => { removedNodes: number; clearedDependencies: number } | null;
   moveNode: (draggedId: string, target: PlanDropTarget) => boolean;
+  regenerateNode: (nodeId: string) => Promise<void>;
   saveNow: (options?: { keepalive?: boolean }) => Promise<void>;
   retrySave: () => Promise<void>;
   dismissIssue: () => void;
@@ -85,6 +89,7 @@ type PlanState = {
 };
 
 let activeController: AbortController | null = null;
+let regenerateController: AbortController | null = null;
 let saveTimer: ReturnType<typeof setTimeout> | null = null;
 let editRevision = 0;
 let saving = false;
@@ -156,6 +161,37 @@ function describeSaveFailure(error: unknown): string {
   return error.message || '保存失败，修改暂未写入。';
 }
 
+function describeRegenerationFailure(error: unknown): string {
+  if (!(error instanceof ApiError)) {
+    return '重新生成失败，请重试。';
+  }
+
+  if (error.code === 'NETWORK_ERROR') {
+    return '无法连接本地服务，重新生成失败。';
+  }
+
+  if (error.code === 'BUSY') {
+    return '已有生成任务正在进行，请稍后再试。';
+  }
+
+  if (error.code === 'CONFLICT') {
+    return '计划已被其他操作修改，请重新尝试。';
+  }
+
+  if (error.code === 'NOT_FOUND') {
+    return '该任务或计划书已不存在，无法重新生成。';
+  }
+
+  if (error.code === 'INTEGRITY' || error.code === 'OUTPUT_INVALID') {
+    const issue = readFirstIssue(error.detail);
+    return issue
+      ? `重新生成结果未通过校验：${issue.message}`
+      : error.message;
+  }
+
+  return error.message || '重新生成失败，请重试。';
+}
+
 function sortHistory(items: PlanListItem[]): PlanListItem[] {
   return [...items].sort(comparePlansByUpdatedAt);
 }
@@ -174,6 +210,12 @@ export const usePlanStore = create<PlanState>((set, get) => {
       saveTimer = null;
       void requestSave();
     }, SAVE_DEBOUNCE_MS);
+  }
+
+  function abortRegeneration() {
+    const controller = regenerateController;
+    regenerateController = null;
+    controller?.abort();
   }
 
   async function performSave(keepalive = false): Promise<void> {
@@ -259,6 +301,8 @@ export const usePlanStore = create<PlanState>((set, get) => {
     selectedNodeId: null,
     saveState: { status: 'idle' },
     editError: null,
+    regeneratingNodeId: null,
+    regenerateError: null,
     history: [],
     usage: { count: 0, bytes: 0 },
     historyLoading: false,
@@ -283,6 +327,7 @@ export const usePlanStore = create<PlanState>((set, get) => {
           selectedNodeId: null,
           saveState: { status: 'idle' },
           editError: null,
+          regenerateError: null,
         });
       } catch (error) {
         if (error instanceof ApiError && error.code === 'NOT_FOUND') {
@@ -294,6 +339,8 @@ export const usePlanStore = create<PlanState>((set, get) => {
     generate: async (source) => {
       if (get().generation.phase === 'generating' || !source.trim()) return;
 
+      abortRegeneration();
+      set({ regeneratingNodeId: null, regenerateError: null });
       await get().saveNow();
       clearSaveTimer();
       editRevision += 1;
@@ -320,6 +367,8 @@ export const usePlanStore = create<PlanState>((set, get) => {
           selectedNodeId: null,
           saveState: { status: 'idle' },
           editError: null,
+          regeneratingNodeId: null,
+          regenerateError: null,
         });
         void get().refreshHistory();
       } catch (error) {
@@ -357,6 +406,8 @@ export const usePlanStore = create<PlanState>((set, get) => {
     },
 
     newPlan: async () => {
+      abortRegeneration();
+      set({ regeneratingNodeId: null, regenerateError: null });
       const wasGenerating = get().generation.phase === 'generating';
       if (wasGenerating) get().cancel();
 
@@ -389,6 +440,8 @@ export const usePlanStore = create<PlanState>((set, get) => {
         selectedNodeId: null,
         saveState: { status: 'idle' },
         editError: null,
+        regeneratingNodeId: null,
+        regenerateError: null,
       });
     },
 
@@ -427,6 +480,8 @@ export const usePlanStore = create<PlanState>((set, get) => {
       const state = get();
       if (state.record?.id === id) return true;
 
+      abortRegeneration();
+      set({ regeneratingNodeId: null, regenerateError: null });
       const wasGenerating = state.generation.phase === 'generating';
       if (wasGenerating) get().cancel();
 
@@ -451,6 +506,8 @@ export const usePlanStore = create<PlanState>((set, get) => {
           selectedNodeId: null,
           saveState: { status: 'idle' },
           editError: null,
+          regeneratingNodeId: null,
+          regenerateError: null,
           historyError: null,
           notice: wasGenerating ? '已取消生成。' : null,
         });
@@ -468,6 +525,8 @@ export const usePlanStore = create<PlanState>((set, get) => {
     },
 
     removePlan: async (id) => {
+      abortRegeneration();
+      set({ regeneratingNodeId: null, regenerateError: null });
       const current = get().record?.id === id;
       if (current && get().generation.phase === 'generating') get().cancel();
 
@@ -499,6 +558,8 @@ export const usePlanStore = create<PlanState>((set, get) => {
           selectedNodeId: null,
           saveState: { status: 'idle' },
           editError: null,
+          regeneratingNodeId: null,
+          regenerateError: null,
           notice: null,
         });
       }
@@ -508,6 +569,8 @@ export const usePlanStore = create<PlanState>((set, get) => {
     },
 
     clearHistory: async () => {
+      abortRegeneration();
+      set({ regeneratingNodeId: null, regenerateError: null });
       const wasGenerating = get().generation.phase === 'generating';
       if (wasGenerating) get().cancel();
       if (get().saveState.status === 'saving') await saveChain;
@@ -530,6 +593,8 @@ export const usePlanStore = create<PlanState>((set, get) => {
         selectedNodeId: null,
         saveState: { status: 'idle' },
         editError: null,
+        regeneratingNodeId: null,
+        regenerateError: null,
         notice: wasGenerating ? '已取消生成。' : null,
       });
 
@@ -538,6 +603,7 @@ export const usePlanStore = create<PlanState>((set, get) => {
     },
 
     renamePlan: (title) => {
+      if (get().regeneratingNodeId !== null) return;
       const record = get().record;
       if (!record) return;
 
@@ -562,10 +628,11 @@ export const usePlanStore = create<PlanState>((set, get) => {
 
     selectNode: (id) => {
       if (get().selectedNodeId === id) return;
-      set({ selectedNodeId: id, editError: null });
+      set({ selectedNodeId: id, editError: null, regenerateError: null });
     },
 
     updateNode: (id, patch) => {
+      if (get().regeneratingNodeId !== null) return;
       const record = get().record;
       if (!record) return;
 
@@ -595,6 +662,7 @@ export const usePlanStore = create<PlanState>((set, get) => {
     },
 
     addChildNode: (parentId) => {
+      if (get().regeneratingNodeId !== null) return null;
       const record = get().record;
       if (!record) return null;
 
@@ -621,6 +689,7 @@ export const usePlanStore = create<PlanState>((set, get) => {
     },
 
     deleteNode: (id) => {
+      if (get().regeneratingNodeId !== null) return null;
       const record = get().record;
       if (!record) return null;
 
@@ -657,6 +726,7 @@ export const usePlanStore = create<PlanState>((set, get) => {
     },
 
     moveNode: (draggedId, target) => {
+      if (get().regeneratingNodeId !== null) return false;
       const record = get().record;
       if (!record) return false;
 
@@ -675,6 +745,65 @@ export const usePlanStore = create<PlanState>((set, get) => {
       });
       scheduleSave();
       return true;
+    },
+
+    regenerateNode: async (nodeId) => {
+      const record = get().record;
+      if (!record || get().regeneratingNodeId) return;
+
+      if (get().generation.phase === 'generating') {
+        set({ regenerateError: '请等待当前生成完成后再重新生成。' });
+        return;
+      }
+
+      set({
+        regeneratingNodeId: nodeId,
+        regenerateError: null,
+        editError: null,
+        notice: null,
+      });
+
+      await get().saveNow();
+
+      if (get().saveState.status !== 'idle') {
+        set({
+          regeneratingNodeId: null,
+          regenerateError: '请先解决当前未保存的修改，再重新生成。',
+        });
+        return;
+      }
+
+      const controller = new AbortController();
+      regenerateController = controller;
+
+      try {
+        const result = await regenerateLeafRequest(
+          record.id,
+          nodeId,
+          controller.signal,
+        );
+
+        if (get().record?.id !== record.id) return;
+
+        editRevision += 1;
+        set((state) => ({
+          record: result.record,
+          saveState: { status: 'idle' },
+          editError: null,
+          regenerateError: null,
+          history: upsertHistory(state.history, result.record),
+          notice: result.warning ?? '已重新生成叶子任务。',
+        }));
+      } catch (error) {
+        if (error instanceof ApiError && error.code === 'CANCELLED') return;
+        if (get().record?.id !== record.id) return;
+        set({ regenerateError: describeRegenerationFailure(error) });
+      } finally {
+        if (regenerateController === controller) regenerateController = null;
+        if (get().regeneratingNodeId === nodeId) {
+          set({ regeneratingNodeId: null });
+        }
+      }
     },
 
     saveNow: async (options = {}) => {

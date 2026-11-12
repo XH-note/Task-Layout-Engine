@@ -1,5 +1,10 @@
-import type { PlanIssue } from './plan';
-import { WIRE_PLAN_JSON_SCHEMA, type WirePlan } from './wire';
+import type { LeafOption, PlanNode, PlanIssue } from './plan';
+import {
+  WIRE_LEAF_JSON_SCHEMA,
+  WIRE_PLAN_JSON_SCHEMA,
+  type WireNode,
+  type WirePlan,
+} from './wire';
 
 const WIRE_EXAMPLE: WirePlan = {
   title: '示例计划',
@@ -116,6 +121,100 @@ export const TASK_PLAN_SYSTEM_PROMPT = [
   '结构示例（仅演示字段形状，实际必须生成 12–20 个叶子任务）：',
   JSON.stringify(WIRE_EXAMPLE, null, 2),
 ].join('\n');
+
+const WIRE_LEAF_EXAMPLE: WireNode = {
+  key: 'leaf',
+  title: '重写后的任务标题',
+  desc: '一句话说明这条任务要做什么。',
+  priority: 'P1',
+  estimateHours: 2,
+  deps: [],
+  acceptance: '可检查的验收标准',
+  children: [],
+};
+
+/**
+ * The full-plan prompt requires 12–20 leaves and a whole plan, so it cannot be
+ * reused for a single-node regeneration. This prompt keeps the same output
+ * discipline (JSON only, same leaf rules) but asks for exactly one leaf.
+ */
+export const LEAF_REGENERATION_SYSTEM_PROMPT = [
+  '你是一名资深项目负责人，负责只重写任务计划书中的一个叶子任务。',
+  '只输出一个 JSON 对象，不要输出 Markdown 代码围栏、解释或前后缀文字。',
+  '',
+  '必须遵守以下规则：',
+  '- 使用中文输出；只重写给定的这一个叶子任务，不要新增阶段、分组或子节点。',
+  '- children 必须是空数组。',
+  '- priority 必须是 P0/P1/P2，estimateHours 必须在 0.5–8 之间，acceptance 必须非空。',
+  '- title 不超过 24 个字符，desc 不超过 60 个字符，acceptance 不超过 40 个字符。',
+  '- deps 只能使用用户消息中列出的“可依赖叶子任务 id”，不能包含当前任务自身的 id，不能出现循环依赖。',
+  '- 如果不打算调整依赖，请原样返回当前依赖；不要因为不确定就清空 deps。',
+  '- key 随意填写一个非空字符串即可，最终节点 id 由程序保留原值。',
+  '- 新标题和新说明要贴合原任务与计划目标，不要编造材料中不存在的重大前提。',
+  '',
+  '返回的 JSON 必须完全符合下面的 JSON Schema：',
+  JSON.stringify(WIRE_LEAF_JSON_SCHEMA, null, 2),
+  '',
+  '结构示例：',
+  JSON.stringify(WIRE_LEAF_EXAMPLE, null, 2),
+].join('\n');
+
+export interface LeafRegenerationPromptInput {
+  planTitle: string;
+  goal: string;
+  stagePath: string[];
+  node: PlanNode;
+  siblings: string[];
+  dependencies: string[];
+  leafOptions: LeafOption[];
+}
+
+function describeLeafDependencies(node: PlanNode): string {
+  const deps = node.deps ?? [];
+  return deps.length > 0 ? deps.join(', ') : '（无）';
+}
+
+export function buildLeafRegenerationPrompt(
+  input: LeafRegenerationPromptInput,
+): string {
+  const { node } = input;
+
+  return [
+    '请重写下面这个叶子任务，使其更清晰、可执行；只输出单个 JSON 对象。',
+    '',
+    `计划标题：${input.planTitle}`,
+    `计划目标：${input.goal}`,
+    `阶段路径：${input.stagePath.join(' / ')}`,
+    `当前任务 id：${node.id}`,
+    '',
+    '当前内容：',
+    `- 标题：${node.title}`,
+    `- 说明：${node.desc ?? ''}`,
+    `- 优先级：${node.priority ?? ''}`,
+    `- 工时：${node.estimateHours ?? ''}`,
+    `- 验收标准：${node.acceptance ?? ''}`,
+    `- 依赖 id：${describeLeafDependencies(node)}`,
+    '',
+    '同级任务标题：',
+    ...(input.siblings.length > 0
+      ? input.siblings.map((title) => `- ${title}`)
+      : ['- （无）']),
+    '',
+    '当前依赖的任务标题：',
+    ...(input.dependencies.length > 0
+      ? input.dependencies.map((title) => `- ${title}`)
+      : ['- （无）']),
+    '',
+    '可依赖的叶子任务（deps 只能使用这些 id，且不能包含当前任务 id）：',
+    ...(input.leafOptions.length > 0
+      ? input.leafOptions.map(
+          (option) => `- ${option.id} | ${option.number} ${option.path}`,
+        )
+      : ['- （无）']),
+    '',
+    '只输出一个 JSON 对象，不要输出其它内容。',
+  ].join('\n');
+}
 
 export function buildUserPrompt(source: string): string {
   return ['以下是需要整理的项目材料：', '', source, '', '只输出 JSON。'].join('\n');

@@ -22,7 +22,11 @@ function serviceWith(callModel: CallModel, create = vi.fn(async (record: PlanRec
           apiKey: 'test-key',
         }),
       },
-      planStore: { create },
+      planStore: {
+        create,
+        get: vi.fn(async () => null),
+        update: vi.fn(async (record: PlanRecord) => record),
+      },
       callModel,
     }),
   };

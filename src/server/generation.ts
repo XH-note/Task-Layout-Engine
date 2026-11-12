@@ -1,19 +1,31 @@
 import { randomUUID } from 'node:crypto';
 
 import {
+  buildLeafRegenerationPrompt,
   buildRepairPrompt,
   buildUserPrompt,
+  LEAF_REGENERATION_SYSTEM_PROMPT,
   TASK_PLAN_SYSTEM_PROMPT,
 } from '../shared/generation';
 import { countCodePoints, MAX_SOURCE_CODE_POINTS } from '../shared/source';
 import {
+  applyLeafRegeneration,
+  collectLeafOptions,
+  findPlanNodePath,
+  isGroup,
   normalizeWirePlan,
   validatePlan,
   type Plan,
   type PlanIssue,
   type PlanRecord,
+  type RegeneratedLeafFields,
+  type RegenerateLeafResponse,
 } from '../shared/plan';
-import { parseWirePlanContent } from '../shared/wire';
+import {
+  parseWireNodeContent,
+  parseWirePlanContent,
+  type WireNode,
+} from '../shared/wire';
 import { AppError, cancelledError } from './errors';
 import {
   callChatCompletion,
@@ -31,9 +43,13 @@ type EvaluateResult =
   | { ok: true; plan: Plan; raw: unknown }
   | { ok: false; kind: 'parse' | 'integrity'; issues: PlanIssue[] };
 
+type LeafEvaluateResult =
+  | { ok: true; plan: Plan; warning?: string }
+  | { ok: false; kind: 'parse' | 'integrity'; issues: PlanIssue[] };
+
 export interface GenerationDependencies {
   settingsStore: Pick<SettingsStore, 'getResolved'>;
-  planStore: Pick<PlanStore, 'create'>;
+  planStore: Pick<PlanStore, 'create' | 'get' | 'update'>;
   callModel?: CallModel;
   now?: () => Date;
   createId?: () => string;
@@ -49,6 +65,8 @@ const AUTO_RETRY_DELAY_MS: Record<string, number> = {
 export interface GenerateOptions {
   signal?: AbortSignal;
 }
+
+export type RegenerateLeafOptions = GenerateOptions;
 
 interface RetryState {
   autoRetried: boolean;
@@ -70,7 +88,7 @@ function toProviderSettings(settings: ResolvedSettings): ProviderConnectionSetti
 
 export class GenerationService {
   private readonly settingsStore: Pick<SettingsStore, 'getResolved'>;
-  private readonly planStore: Pick<PlanStore, 'create'>;
+  private readonly planStore: Pick<PlanStore, 'create' | 'get' | 'update'>;
   private readonly callModel: CallModel;
   private readonly now: () => Date;
   private readonly createId: () => string;
@@ -92,6 +110,20 @@ export class GenerationService {
     const source = this.validateSource(rawSource);
     this.throwIfCancelled(options.signal);
 
+    return this.runExclusive(() => this.run(source, options.signal));
+  }
+
+  async regenerateLeaf(
+    planId: string,
+    nodeId: string,
+    options: RegenerateLeafOptions = {},
+  ): Promise<RegenerateLeafResponse> {
+    this.throwIfCancelled(options.signal);
+
+    return this.runExclusive(() => this.runLeafRegeneration(planId, nodeId, options.signal));
+  }
+
+  private async runExclusive<T>(task: () => Promise<T>): Promise<T> {
     if (this.busy) {
       throw new AppError('BUSY', 409, '已有生成请求正在进行，请稍后再试。', {
         retryable: true,
@@ -101,7 +133,7 @@ export class GenerationService {
     this.busy = true;
 
     try {
-      return await this.run(source, options.signal);
+      return await task();
     } finally {
       this.busy = false;
     }
@@ -182,6 +214,134 @@ export class GenerationService {
     };
 
     return this.planStore.create(record);
+  }
+
+  private async runLeafRegeneration(
+    planId: string,
+    nodeId: string,
+    signal?: AbortSignal,
+  ): Promise<RegenerateLeafResponse> {
+    const record = await this.planStore.get(planId);
+    if (!record) {
+      throw new AppError('NOT_FOUND', 404, '找不到该任务计划书。');
+    }
+
+    const path = findPlanNodePath(record.plan.nodes, nodeId);
+    const node = path?.[path.length - 1];
+    if (!path || !node) {
+      throw new AppError('NOT_FOUND', 404, '找不到该任务节点。');
+    }
+
+    if (isGroup(node)) {
+      throw new AppError('INVALID_INPUT', 400, '只能重新生成叶子任务。');
+    }
+
+    const resolved = await this.settingsStore.getResolved();
+    this.throwIfCancelled(signal);
+
+    if (!resolved.apiKey) {
+      throw invalidInput('尚未配置 API Key，请先在设置中填写并保存。');
+    }
+
+    const settings = toProviderSettings(resolved);
+    const allLeafOptions = collectLeafOptions(record.plan.nodes);
+    const leafOptions = allLeafOptions.filter((option) => option.id !== node.id);
+    const dependencies = (node.deps ?? []).map(
+      (dependencyId) =>
+        allLeafOptions.find((option) => option.id === dependencyId)?.title ??
+        dependencyId,
+    );
+    const parent = path[path.length - 2];
+    const siblings = (parent?.children ?? [])
+      .filter((sibling) => sibling.id !== node.id)
+      .map((sibling) => sibling.title);
+
+    const messages: ChatMessage[] = [
+      { role: 'system', content: LEAF_REGENERATION_SYSTEM_PROMPT },
+      {
+        role: 'user',
+        content: buildLeafRegenerationPrompt({
+          planTitle: record.plan.title,
+          goal: record.plan.goal,
+          stagePath: path.slice(0, -1).map((item) => item.title),
+          node,
+          siblings,
+          dependencies,
+          leafOptions,
+        }),
+      },
+    ];
+
+    const retryState: RetryState = { autoRetried: false };
+    let response = await this.invokeModel(settings, messages, signal, retryState);
+    this.assertUsable(response.content, response.finishReason);
+
+    let usage = response.usage;
+    let outcome = this.evaluateLeafOutput(response.content, record.plan, node.id);
+
+    if (!outcome.ok) {
+      this.throwIfCancelled(signal);
+      messages.push({ role: 'assistant', content: response.content });
+      messages.push({ role: 'user', content: buildRepairPrompt(outcome.issues) });
+
+      response = await this.invokeModel(settings, messages, signal, retryState);
+      this.assertUsable(response.content, response.finishReason);
+      usage = mergeUsage(usage, response.usage);
+      outcome = this.evaluateLeafOutput(response.content, record.plan, node.id);
+
+      if (!outcome.ok) {
+        const code = outcome.kind === 'parse' ? 'OUTPUT_INVALID' : 'INTEGRITY';
+        throw new AppError(code, 422, '模型两次输出都未通过叶子任务校验。', {
+          retryable: true,
+          detail: outcome.issues,
+        });
+      }
+    }
+
+    this.throwIfCancelled(signal);
+
+    const updated: PlanRecord = {
+      ...record,
+      title: outcome.plan.title,
+      plan: outcome.plan,
+      updatedAt: this.now().toISOString(),
+      usage,
+    };
+
+    const saved = await this.planStore.update(updated, {
+      expectedUpdatedAt: record.updatedAt,
+    });
+
+    return {
+      record: saved,
+      ...(outcome.warning ? { warning: outcome.warning } : {}),
+    };
+  }
+
+  private evaluateLeafOutput(
+    content: string,
+    plan: Plan,
+    nodeId: string,
+  ): LeafEvaluateResult {
+    const parsed = parseWireNodeContent(content);
+
+    if (!parsed.ok) {
+      return { ok: false, kind: 'parse', issues: parsed.issues };
+    }
+
+    const applied = applyLeafRegeneration(plan, nodeId, leafFieldsFromWire(parsed.wire));
+
+    if (applied.issues.length > 0) {
+      return { ok: false, kind: 'integrity', issues: applied.issues };
+    }
+
+    return {
+      ok: true,
+      plan: applied.plan,
+      ...(applied.depsKept
+        ? { warning: '新结果的依赖不合法，已保留原依赖。' }
+        : {}),
+    };
   }
 
   private async invokeModel(
@@ -269,6 +429,25 @@ export class GenerationService {
 
     return { ok: true, plan, raw: parsed.raw };
   }
+}
+
+function leafFieldsFromWire(wire: WireNode): RegeneratedLeafFields {
+  const deps = Array.from(
+    new Set(
+      wire.deps
+        .map((dependencyId) => dependencyId.trim())
+        .filter((dependencyId) => dependencyId.length > 0),
+    ),
+  );
+
+  return {
+    title: wire.title,
+    desc: wire.desc.trim() || undefined,
+    priority: wire.priority === '' ? undefined : wire.priority,
+    estimateHours: wire.estimateHours,
+    deps,
+    acceptance: wire.acceptance,
+  };
 }
 
 function autoRetryDelay(error: unknown): number | null {

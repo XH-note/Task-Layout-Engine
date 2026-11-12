@@ -6,6 +6,7 @@ import {
   validWirePlan,
 } from '../test-support/wire-plan';
 import {
+  applyLeafRegeneration,
   collectLeafOptions,
   collectSubtreeIds,
   computeNodeNumbers,
@@ -854,6 +855,100 @@ describe('createLeafDraft', () => {
     expect(draft.acceptance?.trim()).not.toBe('');
     expect(draft.children).toBeUndefined();
     expect(validatePlan({ ...plan, nodes })).toEqual([]);
+  });
+});
+
+describe('applyLeafRegeneration', () => {
+  it('replaces only the target leaf and keeps its id, position, and number', () => {
+    const { plan } = normalized();
+
+    const result = applyLeafRegeneration(plan, 'id-2', {
+      title: '盘点依赖（更新）',
+      desc: '重新核对依赖。',
+      priority: 'P0',
+      estimateHours: 2,
+      acceptance: '依赖清单已核对。',
+    });
+
+    expect(result.issues).toEqual([]);
+    expect(result.depsKept).toBe(false);
+    expect(findPlanNode(result.plan.nodes, 'id-2')).toMatchObject({
+      id: 'id-2',
+      title: '盘点依赖（更新）',
+      desc: '重新核对依赖。',
+      priority: 'P0',
+      estimateHours: 2,
+      acceptance: '依赖清单已核对。',
+    });
+    expect(findPlanNode(result.plan.nodes, 'id-3')).toEqual(
+      findPlanNode(plan.nodes, 'id-3'),
+    );
+    expect(computeNodeNumbers(result.plan.nodes).get('id-2')).toBe(
+      computeNodeNumbers(plan.nodes).get('id-2'),
+    );
+    expect(validatePlan(result.plan)).toEqual([]);
+  });
+
+  it('keeps the original dependencies when the new ones are missing', () => {
+    const { plan } = normalized();
+
+    const result = applyLeafRegeneration(plan, 'id-8', {
+      title: '切换 DNS',
+      deps: ['missing-node'],
+    });
+
+    expect(result.depsKept).toBe(true);
+    expect(result.issues).toEqual([]);
+    expect(findPlanNode(result.plan.nodes, 'id-8')?.deps).toEqual(['id-5']);
+  });
+
+  it('keeps the original dependencies when the new ones create a cycle', () => {
+    const plan = {
+      ...normalized().plan,
+      nodes: [
+        {
+          id: 'stage',
+          title: '阶段',
+          children: [
+            {
+              id: 'x',
+              title: '任务 X',
+              priority: 'P2' as const,
+              estimateHours: 1,
+              acceptance: '完成。',
+            },
+            {
+              id: 'y',
+              title: '任务 Y',
+              priority: 'P2' as const,
+              estimateHours: 1,
+              deps: ['x'],
+              acceptance: '完成。',
+            },
+          ],
+        },
+      ],
+    };
+
+    const result = applyLeafRegeneration(plan, 'x', {
+      title: '任务 X',
+      deps: ['y'],
+    });
+
+    expect(result.depsKept).toBe(true);
+    expect(result.issues).toEqual([]);
+    expect(findPlanNode(result.plan.nodes, 'x')?.deps).toBeUndefined();
+  });
+
+  it('rejects non-leaf targets and invalid fields', () => {
+    const { plan } = normalized();
+
+    expect(applyLeafRegeneration(plan, 'id-1', { title: '阶段' }).issues[0]?.message).toBe(
+      '只能重新生成叶子任务。',
+    );
+    expect(applyLeafRegeneration(plan, 'id-2', { title: '   ' }).issues).toEqual([
+      { path: 'nodes[0].children[0].title', message: '节点标题不能为空。' },
+    ]);
   });
 });
 
