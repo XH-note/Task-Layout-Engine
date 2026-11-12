@@ -1,4 +1,10 @@
-import { collectLeaves, computeNodeNumbers, type PlanNode } from '../shared/plan';
+import {
+  computeNodeNumbers,
+  isGroup,
+  resolveDependencyNumbers,
+  type PlanNode,
+} from '../shared/plan';
+import { computeStageSummary, formatHours } from '../shared/summary';
 
 interface PlanTreeProps {
   nodes: PlanNode[];
@@ -12,15 +18,51 @@ function PlanBranch({
   numbers: Map<string, string>;
 }) {
   const children = node.children ?? [];
+  const group = isGroup(node);
   const number = numbers.get(node.id) ?? '';
+  const dependencies = resolveDependencyNumbers(node.deps, numbers);
 
   return (
-    <li className={children.length > 0 ? 'plan-branch' : 'plan-leaf'}>
+    <li className={group ? 'plan-branch' : 'plan-leaf'}>
       <div className="plan-row">
         <span className="plan-number">{number}</span>
-        <span className="plan-node-title">{node.title}</span>
+        <div className="plan-node-body">
+          <div className="plan-node-heading">
+            <span className="plan-node-title">{node.title}</span>
+            {group ? null : (
+              <span className="plan-node-badges">
+                {node.priority ? (
+                  <span
+                    className={`plan-priority plan-priority-${node.priority.toLowerCase()}`}
+                  >
+                    {node.priority}
+                  </span>
+                ) : null}
+                {node.estimateHours !== undefined ? (
+                  <span className="plan-hours">
+                    {formatHours(node.estimateHours)}
+                  </span>
+                ) : null}
+              </span>
+            )}
+          </div>
+          {group ? null : (
+            <p className="plan-deps">
+              {dependencies.length > 0
+                ? `依赖 ${dependencies.join('、')}`
+                : '无依赖'}
+            </p>
+          )}
+          {node.desc ? <p className="plan-desc">{node.desc}</p> : null}
+          {node.acceptance ? (
+            <p className="plan-acceptance">
+              <span className="plan-field-label">验收标准</span>
+              {node.acceptance}
+            </p>
+          ) : null}
+        </div>
       </div>
-      {children.length > 0 ? (
+      {group ? (
         <ul className="plan-children">
           {children.map((child) => (
             <PlanBranch key={child.id} node={child} numbers={numbers} />
@@ -37,7 +79,7 @@ export default function PlanTree({ nodes }: PlanTreeProps) {
   return (
     <div className="plan-tree">
       {nodes.map((stage) => {
-        const children = stage.children ?? [];
+        const summary = computeStageSummary(stage);
 
         return (
           <section className="plan-stage" key={stage.id}>
@@ -45,13 +87,14 @@ export default function PlanTree({ nodes }: PlanTreeProps) {
               <span className="plan-number plan-stage-number">
                 {numbers.get(stage.id)}
               </span>
-              <h4>{stage.title}</h4>
-              <span className="plan-stage-count">
-                {collectLeaves(children).length} 个叶子任务
+              <h5>{stage.title}</h5>
+              <span className="plan-stage-summary">
+                {summary.taskCount} 个任务 · 合计{' '}
+                {formatHours(summary.totalHours)}
               </span>
             </header>
             <ul className="plan-stage-list">
-              {children.map((child) => (
+              {(stage.children ?? []).map((child) => (
                 <PlanBranch key={child.id} node={child} numbers={numbers} />
               ))}
             </ul>

@@ -73,7 +73,7 @@ function cleanList(items: string[]): string[] {
   return items.map((item) => item.trim()).filter((item) => item.length > 0);
 }
 
-function isGroup(node: PlanNode): boolean {
+export function isGroup(node: PlanNode): boolean {
   return (node.children?.length ?? 0) > 0;
 }
 
@@ -396,6 +396,13 @@ export function collectLeaves(nodes: PlanNode[]): PlanNode[] {
 
   walk(nodes);
   return leaves;
+}
+
+export function resolveDependencyNumbers(
+  deps: string[] | undefined,
+  numbers: Map<string, string>,
+): string[] {
+  return (deps ?? []).map((id) => numbers.get(id) ?? '未知编号');
 }
 
 export function findPlanNode(
