@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode } from 'react';
 
-import type { PlanRecord } from '../shared/plan';
+import type { PlanDropTarget, PlanRecord } from '../shared/plan';
 import {
   computePlanSummary,
   formatGeneratedAt,
@@ -44,11 +44,13 @@ export default function PlanDocument({
   selectedNodeId,
   onSelectNode,
   onRenamePlan,
+  onMoveNode,
 }: {
   record: PlanRecord;
   selectedNodeId: string | null;
   onSelectNode: (id: string) => void;
   onRenamePlan: (title: string) => void;
+  onMoveNode: (draggedId: string, target: PlanDropTarget) => void;
 }) {
   const { plan } = record;
   const summary = computePlanSummary(plan);
@@ -141,6 +143,7 @@ export default function PlanDocument({
           nodes={plan.nodes}
           selectedId={selectedNodeId}
           onSelect={onSelectNode}
+          onMoveNode={onMoveNode}
         />
       </PlanSection>
 

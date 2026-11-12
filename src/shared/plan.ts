@@ -667,6 +667,219 @@ export function createLeafDraft(id: string = defaultNodeId()): PlanNode {
   };
 }
 
+export type PlanDropTarget =
+  | { kind: 'stage-end'; stageId: string }
+  | { kind: 'stage-position'; stageId: string; position: 'before' | 'after' }
+  | { kind: 'sibling'; nodeId: string; position: 'before' | 'after' };
+
+export interface MovePlanNodeResult {
+  nodes: PlanNode[];
+  moved: boolean;
+  reason?: string;
+}
+
+function findParentId(
+  nodes: PlanNode[],
+  id: string,
+  parentId: string | null = null,
+): string | null | undefined {
+  for (const node of nodes) {
+    if (node.id === id) return parentId;
+
+    if (node.children && node.children.length > 0) {
+      const found = findParentId(node.children, id, node.id);
+      if (found !== undefined) return found;
+    }
+  }
+
+  return undefined;
+}
+
+function extractPlanNode(
+  nodes: PlanNode[],
+  id: string,
+): { nodes: PlanNode[]; node: PlanNode } | null {
+  const walk = (list: PlanNode[]): PlanNode[] | null => {
+    const index = list.findIndex((node) => node.id === id);
+    if (index >= 0) return [...list.slice(0, index), ...list.slice(index + 1)];
+
+    for (let position = 0; position < list.length; position += 1) {
+      const node = list[position]!;
+      if (!node.children || node.children.length === 0) continue;
+
+      const children = walk(node.children);
+      if (children) {
+        return list.map((current, currentIndex) =>
+          currentIndex === position ? { ...current, children } : current,
+        );
+      }
+    }
+
+    return null;
+  };
+
+  const node = findPlanNode(nodes, id);
+  const extracted = node ? walk(nodes) : null;
+
+  return node && extracted ? { nodes: extracted, node } : null;
+}
+
+function insertSiblingNode(
+  nodes: PlanNode[],
+  targetId: string,
+  node: PlanNode,
+  position: 'before' | 'after',
+): PlanNode[] | null {
+  const index = nodes.findIndex((current) => current.id === targetId);
+  if (index >= 0) {
+    const next = [...nodes];
+    next.splice(index + (position === 'after' ? 1 : 0), 0, node);
+    return next;
+  }
+
+  for (let positionIndex = 0; positionIndex < nodes.length; positionIndex += 1) {
+    const current = nodes[positionIndex]!;
+    if (!current.children || current.children.length === 0) continue;
+
+    const children = insertSiblingNode(
+      current.children,
+      targetId,
+      node,
+      position,
+    );
+    if (children) {
+      return nodes.map((candidate, candidateIndex) =>
+        candidateIndex === positionIndex
+          ? { ...candidate, children }
+          : candidate,
+      );
+    }
+  }
+
+  return null;
+}
+
+function rejectedMove(nodes: PlanNode[], reason: string): MovePlanNodeResult {
+  return { nodes, moved: false, reason };
+}
+
+export function movePlanNode(
+  nodes: PlanNode[],
+  draggedId: string,
+  target: PlanDropTarget,
+): MovePlanNodeResult {
+  const dragged = findPlanNode(nodes, draggedId);
+  if (!dragged) return rejectedMove(nodes, '找不到要移动的节点。');
+
+  const isStage = nodes.some((node) => node.id === draggedId);
+
+  if (isStage) {
+    if (target.kind !== 'stage-position') {
+      return rejectedMove(nodes, '阶段只能拖到另一个阶段头调整顺序。');
+    }
+
+    if (target.stageId === draggedId) return { nodes, moved: false };
+
+    const from = nodes.findIndex((node) => node.id === draggedId);
+    const to = nodes.findIndex((node) => node.id === target.stageId);
+    if (from < 0 || to < 0) return rejectedMove(nodes, '找不到放置目标。');
+
+    const without = nodes.filter((node) => node.id !== draggedId);
+    let insertAt = to + (target.position === 'after' ? 1 : 0);
+    if (from < insertAt) insertAt -= 1;
+    if (insertAt === from) return { nodes, moved: false };
+
+    const next = [...without];
+    next.splice(insertAt, 0, dragged);
+    return { nodes: next, moved: true };
+  }
+
+  if (target.kind === 'stage-position') {
+    return rejectedMove(nodes, '只有阶段头可以拖动来调整阶段顺序。');
+  }
+
+  const sourceParent = findParentId(nodes, draggedId);
+  if (sourceParent === undefined) return rejectedMove(nodes, '找不到任务所在的层级。');
+
+  if (target.kind === 'stage-end') {
+    const stage = nodes.find((node) => node.id === target.stageId);
+    if (!stage) return rejectedMove(nodes, '找不到放置目标。');
+
+    const children = stage.children ?? [];
+    if (
+      sourceParent === stage.id &&
+      children[children.length - 1]?.id === draggedId
+    ) {
+      return { nodes, moved: false };
+    }
+
+    if (sourceParent !== null) {
+      const parent = findPlanNode(nodes, sourceParent);
+      if ((parent?.children ?? []).length === 1) {
+        return rejectedMove(
+          nodes,
+          '移走后上级节点会变空，请先新增任务再移走。',
+        );
+      }
+    }
+
+    const extracted = extractPlanNode(nodes, draggedId);
+    if (!extracted) return rejectedMove(nodes, '找不到要移动的节点。');
+
+    const next = extracted.nodes.map((node) =>
+      node.id === stage.id
+        ? { ...node, children: [...(node.children ?? []), extracted.node] }
+        : node,
+    );
+
+    return { nodes: next, moved: true };
+  }
+
+  if (target.nodeId === draggedId) return { nodes, moved: false };
+
+  const targetPath = findPlanNodePath(nodes, target.nodeId);
+  if (!targetPath) return rejectedMove(nodes, '找不到放置目标。');
+  if (targetPath.some((node) => node.id === draggedId)) {
+    return rejectedMove(nodes, '不能把任务拖进自己的子树。');
+  }
+
+  const targetParent = findParentId(nodes, target.nodeId);
+  if (targetParent === undefined) return rejectedMove(nodes, '找不到放置目标。');
+
+  if (sourceParent !== null) {
+    const parent = findPlanNode(nodes, sourceParent);
+    if ((parent?.children ?? []).length === 1) {
+      return rejectedMove(
+        nodes,
+        '移走后上级节点会变空，请先新增任务再移走。',
+      );
+    }
+  }
+
+  const sourcePath = findPlanNodePath(nodes, draggedId) ?? [];
+  const sameParent = sourceParent === targetParent;
+  const sameDepthAcrossParents =
+    sourcePath.length === targetPath.length;
+
+  if (!sameParent && !sameDepthAcrossParents) {
+    return rejectedMove(nodes, '拖拽不能改变任务层级，只能在同一层级内排序。');
+  }
+
+  const extracted = extractPlanNode(nodes, draggedId);
+  if (!extracted) return rejectedMove(nodes, '找不到要移动的节点。');
+
+  const next = insertSiblingNode(
+    extracted.nodes,
+    target.nodeId,
+    extracted.node,
+    target.position,
+  );
+  if (!next) return rejectedMove(nodes, '找不到放置目标。');
+
+  return { nodes: next, moved: true };
+}
+
+
 export function updatePlanNode(
   nodes: PlanNode[],
   id: string,

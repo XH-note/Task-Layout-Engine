@@ -96,6 +96,7 @@ export default function App() {
   const saveState = usePlanStore((state) => state.saveState);
   const retrySave = usePlanStore((state) => state.retrySave);
   const renamePlan = usePlanStore((state) => state.renamePlan);
+  const moveNode = usePlanStore((state) => state.moveNode);
   const dismissIssue = usePlanStore((state) => state.dismissIssue);
   const dismissInterrupted = usePlanStore((state) => state.dismissInterrupted);
   const dismissNotice = usePlanStore((state) => state.dismissNotice);
@@ -181,6 +182,7 @@ export default function App() {
         selectedNodeId={selectedNodeId}
         onSelectNode={selectNode}
         onRenamePlan={renamePlan}
+        onMoveNode={moveNode}
       />
     </div>
   ) : null;
@@ -344,6 +346,7 @@ export default function App() {
                 selectedNodeId={selectedNodeId}
                 onSelectNode={selectNode}
                 onRenamePlan={renamePlan}
+                onMoveNode={moveNode}
               />
             ) : (
               <div className="empty-document">

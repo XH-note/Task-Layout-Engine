@@ -5,6 +5,7 @@ import {
   createLeafDraft,
   insertChildNode,
   MAX_TASK_DEPTH,
+  movePlanNode,
   removePlanNode,
   toPlanListItem,
   updatePlanNode,
@@ -14,6 +15,7 @@ import {
   type PlanListItem,
   type PlanNode,
   type PlanRecord,
+  type PlanDropTarget,
 } from '../shared/plan';
 import {
   ApiError,
@@ -74,6 +76,7 @@ type PlanState = {
   deleteNode: (
     id: string,
   ) => { removedNodes: number; clearedDependencies: number } | null;
+  moveNode: (draggedId: string, target: PlanDropTarget) => boolean;
   saveNow: (options?: { keepalive?: boolean }) => Promise<void>;
   retrySave: () => Promise<void>;
   dismissIssue: () => void;
@@ -651,6 +654,27 @@ export const usePlanStore = create<PlanState>((set, get) => {
         removedNodes: result.removedNodeIds.length,
         clearedDependencies: result.clearedDependencies,
       };
+    },
+
+    moveNode: (draggedId, target) => {
+      const record = get().record;
+      if (!record) return false;
+
+      const result = movePlanNode(record.plan.nodes, draggedId, target);
+      if (!result.moved) {
+        if (result.reason) set({ notice: result.reason, editError: null });
+        return false;
+      }
+
+      editRevision += 1;
+      set({
+        record: { ...record, plan: { ...record.plan, nodes: result.nodes } },
+        saveState: { status: 'dirty' },
+        editError: null,
+        notice: null,
+      });
+      scheduleSave();
+      return true;
     },
 
     saveNow: async (options = {}) => {

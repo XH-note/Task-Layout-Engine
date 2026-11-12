@@ -14,6 +14,7 @@ import {
   findPlanNode,
   findPlanNodePath,
   insertChildNode,
+  movePlanNode,
   normalizeWirePlan,
   removePlanNode,
   updatePlanNode,
@@ -593,6 +594,248 @@ describe('removePlanNode', () => {
     expect(result.nodes).toBe(plan.nodes);
     expect(result.removedNodeIds).toEqual([]);
     expect(result.clearedDependencies).toBe(0);
+  });
+});
+
+describe('movePlanNode', () => {
+  it('reorders leaves inside the same stage', () => {
+    const { plan } = normalized();
+    const result = movePlanNode(plan.nodes, 'id-4', {
+      kind: 'sibling',
+      nodeId: 'id-3',
+      position: 'before',
+    });
+
+    expect(result.moved).toBe(true);
+    expect(result.nodes[0]?.children?.map((node) => node.title)).toEqual([
+      '盘点依赖',
+      '编写脚本',
+      '备份数据',
+      '回滚演练',
+    ]);
+    expect(computeNodeNumbers(result.nodes).get('id-4')).toBe('1.2');
+    expect(validatePlan({ ...plan, nodes: result.nodes })).toEqual([]);
+  });
+
+  it('moves a leaf to the end of another stage', () => {
+    const { plan } = normalized();
+    const result = movePlanNode(plan.nodes, 'id-2', {
+      kind: 'stage-end',
+      stageId: 'id-6',
+    });
+
+    expect(result.moved).toBe(true);
+    expect(result.nodes[0]?.children?.map((node) => node.id)).toEqual([
+      'id-3',
+      'id-4',
+      'id-5',
+    ]);
+    expect(result.nodes[1]?.children?.at(-1)?.id).toBe('id-2');
+    expect(computeNodeNumbers(result.nodes).get('id-2')).toBe('2.5');
+    expect(validatePlan({ ...plan, nodes: result.nodes })).toEqual([]);
+  });
+
+  it('moves a task to the end of its own stage', () => {
+    const { plan } = normalized();
+    const result = movePlanNode(plan.nodes, 'id-3', {
+      kind: 'stage-end',
+      stageId: 'id-1',
+    });
+
+    expect(result.moved).toBe(true);
+    expect(result.nodes[0]?.children?.map((node) => node.id)).toEqual([
+      'id-2',
+      'id-4',
+      'id-5',
+      'id-3',
+    ]);
+    expect(validatePlan({ ...plan, nodes: result.nodes })).toEqual([]);
+  });
+
+  it('reorders stages by their headers', () => {
+    const { plan } = normalized();
+    const result = movePlanNode(plan.nodes, 'id-11', {
+      kind: 'stage-position',
+      stageId: 'id-1',
+      position: 'before',
+    });
+
+    expect(result.moved).toBe(true);
+    expect(result.nodes.map((stage) => stage.title)).toEqual([
+      '收尾阶段',
+      '准备阶段',
+      '执行阶段',
+    ]);
+    expect(computeNodeNumbers(result.nodes).get('id-11')).toBe('1');
+    expect(validatePlan({ ...plan, nodes: result.nodes })).toEqual([]);
+  });
+
+  it('reorders a stage after a later stage', () => {
+    const { plan } = normalized();
+    const result = movePlanNode(plan.nodes, 'id-1', {
+      kind: 'stage-position',
+      stageId: 'id-11',
+      position: 'after',
+    });
+
+    expect(result.moved).toBe(true);
+    expect(result.nodes.map((stage) => stage.id)).toEqual([
+      'id-6',
+      'id-11',
+      'id-1',
+    ]);
+  });
+
+  it('rejects moving a stage onto a task', () => {
+    const { plan } = normalized();
+    const result = movePlanNode(plan.nodes, 'id-1', {
+      kind: 'sibling',
+      nodeId: 'id-2',
+      position: 'before',
+    });
+
+    expect(result.moved).toBe(false);
+    expect(result.nodes).toBe(plan.nodes);
+    expect(result.reason).toContain('阶段只能');
+  });
+
+  it('rejects changing the hierarchy level when moving across depths', () => {
+    const nodes: PlanNode[] = [
+      {
+        id: 'stage',
+        title: '阶段',
+        children: [
+          {
+            id: 'group-a',
+            title: '分组 A',
+            children: [
+              { id: 'a1', title: '任务 A1' },
+              { id: 'a2', title: '任务 A2' },
+            ],
+          },
+          {
+            id: 'group-b',
+            title: '分组 B',
+            children: [{ id: 'b1', title: '任务 B1' }],
+          },
+        ],
+      },
+    ];
+    const result = movePlanNode(nodes, 'a1', {
+      kind: 'sibling',
+      nodeId: 'group-b',
+      position: 'after',
+    });
+
+    expect(result.moved).toBe(false);
+    expect(result.nodes).toBe(nodes);
+    expect(result.reason).toContain('不能改变任务层级');
+  });
+
+  it('moves a task across groups at the same depth', () => {
+    const nodes: PlanNode[] = [
+      {
+        id: 'stage',
+        title: '阶段',
+        children: [
+          {
+            id: 'group-a',
+            title: '分组 A',
+            children: [
+              { id: 'a1', title: '任务 A1' },
+              { id: 'a2', title: '任务 A2' },
+            ],
+          },
+          {
+            id: 'group-b',
+            title: '分组 B',
+            children: [{ id: 'b1', title: '任务 B1' }],
+          },
+        ],
+      },
+    ];
+    const result = movePlanNode(nodes, 'a1', {
+      kind: 'sibling',
+      nodeId: 'b1',
+      position: 'after',
+    });
+
+    expect(result.moved).toBe(true);
+    const groups = result.nodes[0]?.children ?? [];
+    expect(groups[0]?.children?.map((node) => node.id)).toEqual(['a2']);
+    expect(groups[1]?.children?.map((node) => node.id)).toEqual(['b1', 'a1']);
+  });
+
+  it('moves a task after a later sibling', () => {
+    const { plan } = normalized();
+    const result = movePlanNode(plan.nodes, 'id-2', {
+      kind: 'sibling',
+      nodeId: 'id-4',
+      position: 'after',
+    });
+
+    expect(result.moved).toBe(true);
+    expect(result.nodes[0]?.children?.map((node) => node.id)).toEqual([
+      'id-3',
+      'id-4',
+      'id-2',
+      'id-5',
+    ]);
+  });
+
+  it('moves a group together with its subtree', () => {
+    const nodes: PlanNode[] = [
+      {
+        id: 's1',
+        title: '阶段一',
+        children: [
+          {
+            id: 'group-a',
+            title: '分组 A',
+            children: [
+              { id: 'a1', title: '任务 A1' },
+              { id: 'a2', title: '任务 A2' },
+            ],
+          },
+          { id: 't1', title: '任务 T1' },
+        ],
+      },
+      {
+        id: 's2',
+        title: '阶段二',
+        children: [{ id: 't2', title: '任务 T2' }],
+      },
+    ];
+    const result = movePlanNode(nodes, 'group-a', {
+      kind: 'sibling',
+      nodeId: 't2',
+      position: 'after',
+    });
+
+    expect(result.moved).toBe(true);
+    expect(result.nodes[0]?.children?.map((node) => node.id)).toEqual(['t1']);
+    expect(result.nodes[1]?.children?.map((node) => node.id)).toEqual([
+      't2',
+      'group-a',
+    ]);
+    expect(result.nodes[1]?.children?.[1]?.children?.map((node) => node.id)).toEqual([
+      'a1',
+      'a2',
+    ]);
+  });
+
+  it('rejects emptying a stage through a cross-stage move', () => {
+    const nodes: PlanNode[] = [
+      { id: 's1', title: '阶段一', children: [{ id: 't1', title: '任务一' }] },
+      { id: 's2', title: '阶段二', children: [{ id: 't2', title: '任务二' }] },
+    ];
+    const result = movePlanNode(nodes, 't1', {
+      kind: 'stage-end',
+      stageId: 's2',
+    });
+
+    expect(result.moved).toBe(false);
+    expect(result.reason).toContain('上级节点会变空');
   });
 });
 
