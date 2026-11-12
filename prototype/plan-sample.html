@@ -1,0 +1,407 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>任务计划书 · 导出样张原型</title>
+<!--
+  PROTOTYPE — 一次性抛弃物，用于讨论「一页任务计划书长什么样」。
+  三个版式变体，用 ?variant=A|B|C 切换；打印时隐藏切换条，直接 Ctrl+P 可看 PDF 效果。
+  不是最终样式，不要照抄进实现。
+-->
+<style>
+  :root{
+    --ink:#1b1b1b; --muted:#6b6b6b; --line:#dcdcdc; --accent:#1f4e79;
+    --p0:#a63a3a; --p1:#8a6d1f; --p2:#5a6b7a; --bar:#d6e4f5;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0}
+  body{
+    background:#e9e9e9;
+    color:var(--ink);
+    font-family:"Microsoft YaHei","PingFang SC","Noto Sans SC","Source Han Sans SC",sans-serif;
+    font-size:10.5pt; line-height:1.55;
+    -webkit-print-color-adjust:exact; print-color-adjust:exact;
+  }
+  body{padding-top:30px}
+  .sheet{
+    width:210mm; padding:18mm 16mm; margin:0 auto 90px;
+    background:#fff; box-shadow:0 2px 18px rgba(0,0,0,.18);
+  }
+  h1,h2,h3,h4{margin:0; font-weight:700; letter-spacing:.01em}
+  p{margin:0}
+  .doc-kicker{font-size:8.5pt; color:var(--muted); letter-spacing:.18em; text-transform:uppercase}
+  .doc-title{font-size:19pt; line-height:1.3; margin-top:4px}
+  .meta{display:flex; flex-wrap:wrap; gap:4px 16px; font-size:8.8pt; color:var(--muted); margin-top:10px}
+  .meta b{color:var(--ink); font-weight:600}
+  .rule{height:2px; background:var(--ink); margin:14px 0 0}
+  section{margin-top:16px}
+  h2{font-size:11.5pt; padding-bottom:3px; border-bottom:1px solid var(--line); margin-bottom:8px}
+  h3{font-size:10.5pt; margin:10px 0 4px}
+  .lead{font-size:9.6pt; color:#333}
+  .muted{color:var(--muted)}
+  .small{font-size:8.6pt}
+
+  /* ---------- 通用：任务条目（变体 A） ---------- */
+  .task{padding:5px 0; border-bottom:1px dotted #e6e6e6; break-inside:avoid}
+  .t-head{display:flex; align-items:baseline; gap:8px}
+  .wbs{font-variant-numeric:tabular-nums; font-weight:700; color:var(--accent); min-width:26px}
+  .t-name{font-weight:600}
+  .t-meta{margin-left:auto; font-size:8.4pt; color:var(--muted); font-variant-numeric:tabular-nums; white-space:nowrap}
+  .t-desc{font-size:9.3pt; color:#3a3a3a; margin:1px 0 0 34px}
+  .t-accept{font-size:8.6pt; color:var(--muted); margin-left:34px}
+  .t-accept b{color:#2f5d3a; font-weight:600}
+  .phase-head{display:flex; align-items:baseline; gap:10px; margin-top:14px}
+  .phase-head .num{font-size:9pt; color:#fff; background:var(--ink); padding:1px 7px; border-radius:2px}
+  .phase-head .ph-meta{margin-left:auto; font-size:8.6pt; color:var(--muted); font-variant-numeric:tabular-nums}
+
+  /* ---------- 优先级 ---------- */
+  .p{font-size:7.8pt; font-weight:700; padding:0 4px; border:1px solid currentColor; border-radius:2px; vertical-align:1px; white-space:nowrap}
+  .p0{color:var(--p0)} .p1{color:var(--p1)} .p2{color:var(--p2)}
+
+  /* ---------- 变体 A：里程碑表 ---------- */
+  table.ms{width:100%; border-collapse:collapse; font-size:8.8pt; margin-top:4px}
+  table.ms th{text-align:left; font-weight:600; color:var(--muted); border-bottom:1px solid var(--line); padding:3px 6px}
+  table.ms td{padding:3px 6px; border-bottom:1px dotted #e6e6e6; font-variant-numeric:tabular-nums}
+  ul.check{margin:4px 0 0; padding-left:18px; font-size:9.3pt}
+  ul.check li{margin:2px 0}
+
+  /* ---------- 变体 B：一页矩阵 ---------- */
+  table.matrix{width:100%; border-collapse:collapse; table-layout:fixed; font-size:8.2pt; line-height:1.35}
+  table.matrix th{font-size:7.6pt; color:var(--muted); font-weight:600; text-align:left; padding:2px 3px; border-bottom:1px solid var(--ink); white-space:nowrap}
+  table.matrix th.w{text-align:center}
+  table.matrix td{padding:2.5px 3px; border-bottom:1px solid #ececec; vertical-align:top}
+  table.matrix td.w{border-left:1px dashed #ececec; padding:0}
+  table.matrix td.w.on{background:var(--bar)}
+  table.matrix td.w.on.s{border-radius:3px 0 0 3px}
+  table.matrix td.w.on.e{border-radius:0 3px 3px 0}
+  table.matrix tr.phase-row td{background:#f4f4f2; font-weight:700; font-size:8pt; padding:3px 3px; border-bottom:1px solid #ddd}
+  .tbl-wbs{font-variant-numeric:tabular-nums; font-weight:700; color:var(--accent)}
+  .mat-note{font-size:7.8pt; color:var(--muted); margin-top:6px}
+
+  /* ---------- 变体 C：卡片看板 ---------- */
+  .ms-strip{display:flex; gap:0; margin:6px 0 14px}
+  .ms-item{flex:1; position:relative; padding:0 8px; border-top:2px solid var(--line)}
+  .ms-item.done{border-top-color:var(--accent)}
+  .ms-item .d{font-size:8pt; color:var(--muted); font-variant-numeric:tabular-nums}
+  .ms-item .n{font-size:9pt; font-weight:600}
+  .lane{margin-top:12px; break-inside:avoid}
+  .lane-head{display:flex; align-items:baseline; gap:8px; border-left:3px solid var(--ink); padding-left:8px; margin-bottom:6px}
+  .lane-head .ln{font-size:8.4pt; color:var(--muted); font-variant-numeric:tabular-nums}
+  .cards{display:grid; grid-template-columns:1fr 1fr; gap:7px}
+  .card{border:1px solid var(--line); border-left:3px solid var(--line); border-radius:3px; padding:6px 8px; break-inside:avoid}
+  .card.p0{border-left-color:var(--p0)} .card.p1{border-left-color:var(--p1)} .card.p2{border-left-color:var(--p2)}
+  .card .ch{display:flex; align-items:baseline; gap:6px}
+  .card .cn{font-weight:600; font-size:9.4pt}
+  .card .cd{font-size:8.6pt; color:#444; margin-top:2px}
+  .card .cf{display:flex; flex-wrap:wrap; gap:4px 10px; margin-top:5px; font-size:7.8pt; color:var(--muted); font-variant-numeric:tabular-nums}
+  .card .ca{font-size:7.9pt; color:#2f5d3a; margin-top:3px}
+
+  /* ---------- 原型界面 ---------- */
+  .proto-banner{
+    position:fixed; top:0; left:0; right:0; z-index:20;
+    background:#1b1b1b; color:#fff; font-size:11px; padding:5px 12px; text-align:center;
+  }
+  .proto-banner b{color:#ffd479}
+  .switcher{
+    position:fixed; left:50%; bottom:18px; transform:translateX(-50%); z-index:30;
+    display:flex; align-items:center; gap:2px; background:#111; color:#fff;
+    border-radius:999px; padding:5px 6px; box-shadow:0 6px 24px rgba(0,0,0,.35);
+    font-size:12px; user-select:none;
+  }
+  .switcher button{background:transparent; color:#fff; border:0; font-size:15px; padding:3px 10px; cursor:pointer; border-radius:999px}
+  .switcher button:hover{background:#2c2c2c}
+  .switcher .label{padding:0 10px; min-width:150px; text-align:center; white-space:nowrap}
+  .switcher .label small{color:#9a9a9a}
+  .switcher .hint{color:#8a8a8a; font-size:10px; padding:0 8px; border-left:1px solid #333; margin-left:2px}
+
+  @media print{
+    body{background:#fff; padding-top:0}
+    .sheet{width:auto; margin:0; padding:0; box-shadow:none}
+    .proto-banner,.switcher{display:none !important}
+    section{margin-top:12pt}
+  }
+  @page{
+    size:A4; margin:17mm 15mm 15mm;
+    @bottom-left{content:"任务计划书 · 内部讨论稿"; font-size:8pt; color:#999}
+    @bottom-right{content:"第 " counter(page) " / " counter(pages) " 页"; font-size:8pt; color:#999}
+  }
+</style>
+</head>
+<body>
+<div class="proto-banner">原型 · 只用来讨论版式，不是最终样式 &nbsp;|&nbsp; 底部切换或按 <b>← →</b> 换三个版本；<b>Ctrl+P</b> 可看打印效果</div>
+<div id="root"></div>
+
+<div class="switcher">
+  <button id="prev" title="上一个">‹</button>
+  <div class="label" id="label"></div>
+  <button id="next" title="下一个">›</button>
+  <div class="hint">?variant=A|B|C</div>
+</div>
+
+<script>
+const plan = {
+  title: "官网迁移至 Astro + Sanity（中英双语）",
+  meta: {
+    generated: "2026-11-12 15:04",
+    source: "粘贴文本 · 1,842 字",
+    version: "v1",
+    totalHours: 133,
+    window: "6 周 · 11/16 → 12/24"
+  },
+  goal: "在 6 周内把公司官网从 WordPress 迁到 Astro + Sanity，完成中英双语上线，并保证现有 SEO 流量不掉。",
+  background: "旧站 300+ 页面、单一语言、依赖插件，编辑体验与加载速度都已成为瓶颈。新站要求静态生成、结构化内容、双语并行，且上线后 24 小时内可整体回滚。",
+  success: [
+    "旧站有流量的 URL 100% 301 到新对应页，抽样 50 条全通过",
+    "中英双语 12 个核心页可访问，无中英混排",
+    "Lighthouse 移动端 性能 ≥ 90、SEO ≥ 95、可访问性 ≥ 90",
+    "回滚演练 ≤ 30 分钟完成，上线后 24h 内 404 率 < 0.5%"
+  ],
+  phases: [
+    { id:"1", name:"立项与盘点", hours:13, priority:"P0", tasks:[
+      { id:"1.1", name:"盘点旧站页面与流量", desc:"导出 WordPress 全部页面与近 12 个月访问数据，标记有流量、有转化的 URL。", hours:6, priority:"P0", deps:[], weeks:[1,1], accept:"交付 300+ URL 清单，含月访问与转化" },
+      { id:"1.2", name:"确认 URL 映射与 301 规则", desc:"按「保留结构优先、语义最近次之」确定新旧 URL 对应关系与重定向清单。", hours:4, priority:"P0", deps:["1.1"], weeks:[1,2], accept:"映射表覆盖 100% 有流量的 URL，无需人工补映射" },
+      { id:"1.3", name:"确定双语内容范围", desc:"列出必须翻译的页面与可暂缓的页面，确认译稿来源与交付时间。", hours:3, priority:"P1", deps:[], weeks:[1,1], accept:"中英对照清单，标注需新译页面与责任人" }
+    ]},
+    { id:"2", name:"内容与设计", hours:46, priority:"P0", tasks:[
+      { id:"2.1", name:"迁移 12 个核心页文案", desc:"把 12 个核心页面整理为结构化文案并录入 Sanity，中英各一份。", hours:20, priority:"P0", deps:["1.3"], weeks:[2,3], accept:"12 页中英定稿，全部进入 Sanity 且可预览" },
+      { id:"2.2", name:"建立 8 个页面模板", desc:"覆盖首页、产品、方案、案例、博客、关于、招聘、联系。", hours:16, priority:"P0", deps:[], weeks:[2,3], accept:"模板清单 + Figma 标注可直接开发" },
+      { id:"2.3", name:"设计 6 个可复用区块", desc:"导航、页脚、CTA、卡片列表、图文、FAQ，用于模板组合。", hours:10, priority:"P1", deps:["2.2"], weeks:[3,3], accept:"区块与模板对照表无缺口" }
+    ]},
+    { id:"3", name:"开发", hours:47, priority:"P0", tasks:[
+      { id:"3.1", name:"搭 Astro 骨架与 Sanity schema", desc:"初始化路由、构建管线、内容模型，冻结字段定义。", hours:12, priority:"P0", deps:["2.2"], weeks:[3,3], accept:"本地跑通 3 个示例页，schema 评审通过" },
+      { id:"3.2", name:"实现模板与区块", desc:"按 8 个模板 + 6 个区块完成页面拼装与响应式。", hours:24, priority:"P0", deps:["3.1","2.3"], weeks:[4,5], accept:"8 个模板全部可用，移动端无横向滚动" },
+      { id:"3.3", name:"接 SEO 元数据与结构化数据", desc:"标题/描述/OG、hreflang、JSON-LD、sitemap 配置。", hours:6, priority:"P1", deps:["3.1"], weeks:[4,4], accept:"双语 hreflang 正确，结构化数据通过校验" },
+      { id:"3.4", name:"预渲染与 sitemap 核验", desc:"全站静态产物生成，检查 sitemap 与内部链接。", hours:5, priority:"P0", deps:["3.3"], weeks:[5,5], accept:"sitemap 无 404，内部链接抽样 0 断链" }
+    ]},
+    { id:"4", name:"迁移与验收", hours:18, priority:"P0", tasks:[
+      { id:"4.1", name:"旧 URL 301 全量验证", desc:"脚本比对旧站 URL 清单与新站响应，抽样人工复核。", hours:8, priority:"P0", deps:["3.4"], weeks:[6,6], accept:"全量脚本 0 失败，抽样 50 条人工通过" },
+      { id:"4.2", name:"性能与可访问性达标", desc:"按预算优化图片、字体与脚本，修复可访问性问题。", hours:6, priority:"P1", deps:["3.4"], weeks:[6,6], accept:"Lighthouse 三项达到目标分" },
+      { id:"4.3", name:"回滚预案演练", desc:"演练切回旧站 DNS 与 CDN 配置的完整流程。", hours:4, priority:"P0", deps:["3.4"], weeks:[6,6], accept:"演练一次 ≤ 30 分钟，步骤可复现" }
+    ]},
+    { id:"5", name:"上线", hours:9, priority:"P0", tasks:[
+      { id:"5.1", name:"切 DNS 与 CDN", desc:"灰度切流，观察 1 小时后再全量。", hours:2, priority:"P0", deps:["4.1","4.2","4.3"], weeks:[6,6], accept:"全量切换后核心页 200，无证书告警" },
+      { id:"5.2", name:"上线后 24h 监控", desc:"盯 404、301 命中、核心页性能与错误日志。", hours:4, priority:"P0", deps:["5.1"], weeks:[6,6], accept:"监控面板就绪，404 日报按时发出" },
+      { id:"5.3", name:"关停旧站与归档", desc:"旧站保留 301 一年，导出数据库与插件配置归档。", hours:3, priority:"P2", deps:["5.2"], weeks:[6,6], accept:"归档包可离线恢复，301 规则保留 12 个月" }
+    ]}
+  ],
+  milestones: [
+    { id:"M1", name:"盘点与映射完成", week:2, date:"11/27" },
+    { id:"M2", name:"内容与模板就绪", week:3, date:"12/04" },
+    { id:"M3", name:"开发完成、预渲染通过", week:5, date:"12/18" },
+    { id:"M4", name:"全量上线", week:6, date:"12/24" }
+  ],
+  weeks: [
+    { n:1, range:"11/16" }, { n:2, range:"11/23" }, { n:3, range:"11/30" },
+    { n:4, range:"12/07" }, { n:5, range:"12/14" }, { n:6, range:"12/21" }
+  ],
+  risks: [
+    "旧站导出权限若 2 天内拿不到，1.1 顺延并压缩 2.1 的缓冲",
+    "Sanity schema 若在 3.1 之后变更，内容迁移会返工——字段评审必须一次到位"
+  ],
+  acceptance: [
+    "有流量的旧 URL 100% 301 到新对应页，全量脚本 0 失败、抽样 50 条人工通过",
+    "12 个核心页中英双语可访问，hreflang 双向正确",
+    "Lighthouse 移动端 性能 ≥ 90、SEO ≥ 95、可访问性 ≥ 90",
+    "回滚演练 ≤ 30 分钟；上线后 24h 内 404 率 < 0.5%",
+    "旧站归档包可离线恢复，301 规则保留 12 个月"
+  ]
+};
+
+const allTasks = plan.phases.flatMap(p => p.tasks);
+const totalHours = allTasks.reduce((s,t) => s + t.hours, 0);
+
+const esc = s => String(s).replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;"}[c]));
+const prio = p => `<span class="p p${p.slice(1)}">${p}</span>`;
+const depsText = t => t.deps.length ? "依赖 " + t.deps.join("、") : "— 可立即开始";
+
+function headerBlock() {
+  return `
+    <div class="doc-kicker">任务计划书 · Task Plan</div>
+    <h1 class="doc-title">${esc(plan.title)}</h1>
+    <div class="meta">
+      <span>生成 <b>${plan.meta.generated}</b></span>
+      <span>来源 <b>${plan.meta.source}</b></span>
+      <span>版本 <b>${plan.meta.version}</b></span>
+      <span>总工时 <b>${totalHours} h</b></span>
+      <span>周期 <b>${plan.meta.window}</b></span>
+    </div>
+    <div class="rule"></div>`;
+}
+
+/* ============ 变体 A：文档式 · 编号大纲 ============ */
+function renderA() {
+  const phases = plan.phases.map(p => `
+    <div class="phase-head">
+      <span class="num">${p.id}</span>
+      <h3 style="margin:0">${esc(p.name)}</h3>
+      ${prio(p.priority)}
+      <span class="ph-meta">${p.hours} h · ${p.tasks.length} 项</span>
+    </div>
+    ${p.tasks.map(t => `
+      <div class="task">
+        <div class="t-head">
+          <span class="wbs">${t.id}</span>
+          <span class="t-name">${esc(t.name)}</span>
+          <span class="t-meta">${t.priority} · ${t.hours}h · ${esc(depsText(t))}</span>
+        </div>
+        <p class="t-desc">${esc(t.desc)}</p>
+        <p class="t-accept">验收：<b>${esc(t.accept)}</b></p>
+      </div>`).join("")}
+  `).join("");
+
+  return `${headerBlock()}
+    <section>
+      <h2>一、目标与背景</h2>
+      <p class="lead">${esc(plan.goal)}</p>
+      <p class="lead" style="margin-top:6px">${esc(plan.background)}</p>
+    </section>
+    <section>
+      <h2>二、任务树</h2>
+      ${phases}
+    </section>
+    <section>
+      <h2>三、里程碑</h2>
+      <table class="ms">
+        <thead><tr><th style="width:46px">编号</th><th>里程碑</th><th style="width:52px">周次</th><th style="width:56px">日期</th></tr></thead>
+        <tbody>
+          ${plan.milestones.map(m => `<tr><td>${m.id}</td><td>${esc(m.name)}</td><td>W${m.week}</td><td>${m.date}</td></tr>`).join("")}
+        </tbody>
+      </table>
+    </section>
+    <section>
+      <h2>四、风险与假设</h2>
+      <ul class="check">${plan.risks.map(r => `<li>${esc(r)}</li>`).join("")}</ul>
+    </section>
+    <section>
+      <h2>五、验收标准</h2>
+      <ul class="check">${plan.acceptance.map(a => `<li>${esc(a)}</li>`).join("")}</ul>
+    </section>`;
+}
+
+/* ============ 变体 B：一页矩阵 · 甘特表 ============ */
+function renderB() {
+  const weekHead = plan.weeks.map(w => `<th class="w" style="width:30px">W${w.n}<br><span style="font-weight:400">${w.range}</span></th>`).join("");
+  const rows = plan.phases.map(p => {
+    const phaseRow = `<tr class="phase-row"><td colspan="${5 + plan.weeks.length + 1}">${p.id} · ${esc(p.name)} &nbsp;·&nbsp; ${p.hours}h &nbsp;·&nbsp; ${p.priority}</td></tr>`;
+    const taskRows = p.tasks.map(t => {
+      const cells = plan.weeks.map(w => {
+        const on = w.n >= t.weeks[0] && w.n <= t.weeks[1];
+        const cls = ["w", on ? "on" : "", on && w.n === t.weeks[0] ? "s" : "", on && w.n === t.weeks[1] ? "e" : ""].filter(Boolean).join(" ");
+        return `<td class="${cls}"></td>`;
+      }).join("");
+      return `<tr>
+        <td class="tbl-wbs">${t.id}</td>
+        <td><b>${esc(t.name)}</b></td>
+        <td>${prio(t.priority)}</td>
+        <td style="font-variant-numeric:tabular-nums">${t.hours}h</td>
+        <td class="muted">${t.deps.length ? t.deps.join(", ") : "—"}</td>
+        ${cells}
+        <td class="muted">${esc(t.accept)}</td>
+      </tr>`;
+    }).join("");
+    return phaseRow + taskRows;
+  }).join("");
+
+  return `${headerBlock()}
+    <section style="margin-top:12px">
+      <p class="lead">${esc(plan.goal)}</p>
+      <p class="small muted" style="margin-top:4px">${esc(plan.background)}</p>
+    </section>
+    <section style="margin-top:12px">
+      <h2>任务矩阵（一页版）</h2>
+      <table class="matrix">
+        <colgroup>
+          <col style="width:32px"><col><col style="width:28px"><col style="width:28px"><col style="width:40px">
+          ${plan.weeks.map(() => `<col style="width:26px">`).join("")}
+          <col style="width:150px">
+        </colgroup>
+        <thead><tr>
+          <th>WBS</th><th>任务</th><th>P</th><th>工时</th><th>依赖</th>${weekHead}<th>验收标准</th>
+        </tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+      <p class="mat-note">蓝色条 = 计划占用的周。总工时 ${totalHours}h；M1 ${plan.milestones[0].date} / M2 ${plan.milestones[1].date} / M3 ${plan.milestones[2].date} / 上线 ${plan.milestones[3].date}。关键路径：1.1 → 1.2 → 4.1 → 5.1。</p>
+    </section>
+    <section style="margin-top:10px">
+      <h2>验收标准</h2>
+      <ul class="check" style="columns:2; column-gap:22px">${plan.acceptance.map(a => `<li>${esc(a)}</li>`).join("")}</ul>
+    </section>`;
+}
+
+/* ============ 变体 C：卡片看板 · 阶段泳道 ============ */
+function renderC() {
+  const strip = plan.milestones.map((m,i) => `
+    <div class="ms-item">
+      <div class="d">${m.id} · ${m.date} · W${m.week}</div>
+      <div class="n">${esc(m.name)}</div>
+    </div>`).join("");
+
+  const lanes = plan.phases.map(p => `
+    <div class="lane">
+      <div class="lane-head">
+        <span class="ln">阶段 ${p.id}</span>
+        <h3 style="margin:0">${esc(p.name)}</h3>
+        ${prio(p.priority)}
+        <span class="ln" style="margin-left:auto">${p.hours}h · ${p.tasks.length} 项</span>
+      </div>
+      <div class="cards">
+        ${p.tasks.map(t => `
+          <div class="card p${t.priority.slice(1)}">
+            <div class="ch"><span class="wbs">${t.id}</span><span class="cn">${esc(t.name)}</span></div>
+            <div class="cd">${esc(t.desc)}</div>
+            <div class="cf"><span>${t.hours}h</span><span>${t.priority}</span><span>${esc(depsText(t))}</span><span>W${t.weeks[0]}–W${t.weeks[1]}</span></div>
+            <div class="ca">验收：${esc(t.accept)}</div>
+          </div>`).join("")}
+      </div>
+    </div>`).join("");
+
+  return `${headerBlock()}
+    <section>
+      <p class="lead">${esc(plan.goal)}</p>
+      <p class="small muted" style="margin-top:4px">${esc(plan.background)}</p>
+    </section>
+    <section>
+      <h2>里程碑</h2>
+      <div class="ms-strip">${strip}</div>
+    </section>
+    <section>
+      <h2>任务看板</h2>
+      ${lanes}
+    </section>
+    <section>
+      <h2>验收标准</h2>
+      <ul class="check">${plan.acceptance.map(a => `<li>${esc(a)}</li>`).join("")}</ul>
+    </section>`;
+}
+
+/* ============ 切换器 ============ */
+const ORDER = ["A","B","C"];
+const NAMES = { A:"文档式 · 编号大纲", B:"一页矩阵 · 甘特表", C:"卡片看板 · 阶段泳道" };
+const urlParams = new URLSearchParams(location.search);
+let current = ORDER.includes(urlParams.get("variant")) ? urlParams.get("variant") : "A";
+
+function render() {
+  const root = document.getElementById("root");
+  if (current === "A") root.innerHTML = `<div class="sheet">${renderA()}</div>`;
+  if (current === "B") root.innerHTML = `<div class="sheet">${renderB()}</div>`;
+  if (current === "C") root.innerHTML = `<div class="sheet">${renderC()}</div>`;
+  document.getElementById("label").innerHTML = `<b>${current}</b> · ${NAMES[current]} <small>(${ORDER.indexOf(current)+1}/3)</small>`;
+  const u = new URL(location.href); u.searchParams.set("variant", current);
+  try { history.replaceState(null, "", u); } catch (e) { /* file:// 下部分浏览器禁止改 URL，忽略 */ }
+}
+function go(step) {
+  const i = (ORDER.indexOf(current) + step + ORDER.length) % ORDER.length;
+  current = ORDER[i]; render(); window.scrollTo(0,0);
+}
+document.getElementById("prev").onclick = () => go(-1);
+document.getElementById("next").onclick = () => go(1);
+document.addEventListener("keydown", e => {
+  const el = document.activeElement;
+  if (el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable)) return;
+  if (e.key === "ArrowLeft") go(-1);
+  if (e.key === "ArrowRight") go(1);
+});
+render();
+</script>
+</body>
+</html>

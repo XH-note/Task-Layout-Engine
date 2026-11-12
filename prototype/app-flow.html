@@ -1,0 +1,881 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>任务排版器 · 界面原型</title>
+<!--
+  三个变体，用 ?variant=A|B|C 切换，底部胶囊 + ←/→ 键轮换；?state=plan|generating|error|empty 切场景。
+  目的：验证「粘贴 → 生成 → 编辑 → 导出」的页面分区、编辑粒度、空态/失败态、历史并排与否。
+  这是抛弃物：不进主分支、不做错误处理、不接后端。
+-->
+<style>
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0}
+  body{font-family:"Noto Sans SC","PingFang SC","Microsoft YaHei",system-ui,sans-serif;background:#f4f3ef;color:#1c1c1e;-webkit-font-smoothing:antialiased;font-size:14px}
+  button{font:inherit;cursor:pointer;border:0;background:none;color:inherit}
+  input,textarea{font:inherit;color:inherit}
+  .proto-strip{position:fixed;top:0;left:0;right:0;height:26px;background:#111;color:#ddd;font-size:11.5px;display:flex;align-items:center;justify-content:center;gap:10px;z-index:80;letter-spacing:.02em}
+  .proto-strip b{color:#fff;font-weight:600}
+  .proto-switcher{position:fixed;bottom:16px;left:50%;transform:translateX(-50%);display:flex;align-items:center;gap:6px;background:#111;color:#fff;border-radius:999px;padding:6px 8px;z-index:80;box-shadow:0 10px 30px rgba(0,0,0,.28);font-size:12.5px}
+  .proto-switcher button{width:26px;height:26px;border-radius:50%;color:#fff;font-size:15px;line-height:1}
+  .proto-switcher button:hover{background:#2a2a2a}
+  .proto-switcher .label{padding:0 4px;white-space:nowrap}
+  .proto-switcher select{background:#222;color:#eee;border:1px solid #3a3a3a;border-radius:999px;padding:3px 8px;font-size:12px}
+  .proto-switcher .hint{color:#8b8b8b;font-size:11px;padding:0 4px}
+  .toast{position:fixed;bottom:64px;left:50%;transform:translateX(-50%);background:#1c1c1e;color:#fff;padding:9px 16px;border-radius:8px;font-size:13px;z-index:90;box-shadow:0 8px 24px rgba(0,0,0,.25);max-width:80vw}
+  .btn{display:inline-flex;align-items:center;gap:6px;border:1px solid #d8d5ce;background:#fff;border-radius:7px;padding:6px 11px;font-size:13px;color:#333;transition:.12s}
+  .btn:hover{border-color:#b9b4aa;background:#fcfbf8}
+  .btn-primary{background:#1f4d3f;border-color:#1f4d3f;color:#fff}
+  .btn-primary:hover{background:#173c31}
+  .btn-primary:disabled{opacity:.45;cursor:not-allowed}
+  .btn-ghost{border-color:transparent;background:transparent}
+  .btn-ghost:hover{background:#efede7}
+  .icon-btn{width:26px;height:26px;border-radius:6px;display:inline-flex;align-items:center;justify-content:center;color:#8a867e;font-size:14px}
+  .icon-btn:hover{background:#efede7;color:#333}
+  .muted{color:#8a867e}
+  .tiny{font-size:11.5px}
+  .badge{display:inline-block;padding:1px 7px;border-radius:999px;font-size:11px;border:1px solid #ddd8ce;color:#6d685e;background:#faf8f3}
+  .badge.p0{background:#fdecec;border-color:#f3c9c9;color:#a33b3b}
+  .badge.p1{background:#fdf3e4;border-color:#f0dcbc;color:#946b27}
+  .badge.p2{background:#eef2ee;border-color:#d5ded5;color:#4d6b53}
+  .field{display:block;margin-bottom:12px}
+  .field label{display:block;font-size:11.5px;color:#8a867e;margin-bottom:4px;letter-spacing:.02em}
+  .field input[type=text],.field input[type=number],.field textarea{width:100%;border:1px solid #ddd8ce;border-radius:6px;padding:7px 9px;background:#fff;font-size:13px;outline:none}
+  .field input:focus,.field textarea:focus,.field input:focus-visible{border-color:#1f4d3f;box-shadow:0 0 0 3px rgba(31,77,63,.12)}
+  .field textarea{resize:vertical;min-height:64px;line-height:1.5}
+  .skeleton{border-radius:6px;background:linear-gradient(90deg,#eceae4 25%,#f4f2ec 37%,#eceae4 63%);background-size:400% 100%;animation:sh 1.3s ease infinite}
+  @keyframes sh{0%{background-position:100% 0}100%{background-position:0 0}}
+  .empty-note{color:#9a948a;font-size:13px;line-height:1.7}
+
+  /* ---------- A 工作台 ---------- */
+  .a-app{display:grid;grid-template-rows:52px 1fr;height:100vh;padding-top:26px}
+  .a-top{display:flex;align-items:center;gap:10px;padding:0 16px;border-bottom:1px solid #e3e0d8;background:#fbfaf7}
+  .a-brand{font-weight:700;letter-spacing:.01em}
+  .a-brand span{color:#8a867e;font-weight:400;font-size:12px;margin-left:6px}
+  .a-top .spacer{flex:1}
+  .a-body{display:grid;grid-template-columns:296px minmax(0,1fr) 316px;min-height:0}
+  .a-side{border-right:1px solid #e3e0d8;background:#f8f7f2;display:flex;flex-direction:column;min-height:0}
+  .a-side .block{padding:14px;border-bottom:1px solid #eae7df}
+  .a-side h4{margin:0 0 8px;font-size:11.5px;color:#8a867e;font-weight:600;letter-spacing:.06em}
+  .a-side textarea{width:100%;min-height:132px;border:1px solid #ddd8ce;border-radius:7px;padding:9px;font-size:13px;line-height:1.55;background:#fff;resize:vertical;outline:none}
+  .a-side textarea:focus{border-color:#1f4d3f;box-shadow:0 0 0 3px rgba(31,77,63,.1)}
+  .a-count{display:flex;justify-content:space-between;font-size:11px;color:#9a948a;margin-top:5px}
+  .a-count.over{color:#b23b3b}
+  .a-hist{overflow:auto;flex:1;min-height:0}
+  .a-hist-item{padding:8px 10px;border-radius:7px;cursor:pointer;margin-bottom:2px}
+  .a-hist-item:hover{background:#efede7}
+  .a-hist-item.on{background:#e7e4dc}
+  .a-hist-item .t{font-size:13px;margin-bottom:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .a-hist-item .m{font-size:11px;color:#9a948a}
+  .a-main{overflow:auto;background:#f1efe9;padding:26px 28px 90px;min-width:0}
+  .a-doc{max-width:700px;margin:0 auto;background:#fff;border:1px solid #e6e2d9;box-shadow:0 2px 10px rgba(40,35,25,.05);padding:38px 44px 44px}
+  .a-insp{border-left:1px solid #e3e0d8;background:#fbfaf7;padding:14px;overflow:auto;min-height:0}
+  .a-insp .head{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px}
+  .a-insp .head b{font-size:13px}
+  .doc-title{font-size:22px;font-weight:700;margin:0 0 4px;line-height:1.4}
+  .doc-meta{font-size:12px;color:#9a948a;margin-bottom:22px}
+  .doc-h{font-size:12px;letter-spacing:.08em;color:#8a867e;font-weight:600;margin:26px 0 8px;text-transform:uppercase}
+  .doc-goal{font-size:14px;line-height:1.75;margin:0 0 6px}
+  .phase{margin-top:22px}
+  .phase-title{display:flex;align-items:baseline;gap:8px;font-weight:700;font-size:14.5px;margin-bottom:2px}
+  .phase-title .h{font-size:11px;color:#9a948a;font-weight:500}
+  .task{border-top:1px solid #efede7;padding:10px 8px 10px 6px;margin-left:-6px;border-radius:6px;cursor:pointer}
+  .task:hover{background:#faf8f2}
+  .task.on{background:#f0f5f1;box-shadow:inset 3px 0 0 #1f4d3f}
+  .task-line{display:flex;align-items:baseline;gap:8px}
+  .task-num{font-size:11.5px;color:#9a948a;min-width:24px;font-variant-numeric:tabular-nums}
+  .task-name{font-weight:600;font-size:13.5px;flex:1}
+  .task-meta{font-size:11.5px;color:#8a867e;margin:3px 0 0 32px}
+  .task-desc{font-size:12px;color:#6d685e;line-height:1.6;margin:4px 0 0 32px}
+  .task-acc{font-size:11.5px;color:#4d6b53;margin:3px 0 0 32px}
+  .task-actions{display:flex;gap:2px;opacity:0;transition:.12s}
+  .task:hover .task-actions,.task.on .task-actions{opacity:1}
+  .task[draggable]{cursor:grab}
+  .task.dragging{opacity:.35}
+  .task.drop-before{box-shadow:inset 0 2px 0 #1f4d3f}
+  .task.drop-after{box-shadow:inset 0 -2px 0 #1f4d3f}
+  .phase-title{user-select:none}
+  .phase-title .grip{color:#c9c3b7;font-size:11px;letter-spacing:-1px;margin-right:2px;cursor:grab}
+  .phase-title.dragging{opacity:.35}
+  .phase-title.drop-phase{box-shadow:inset 0 2px 0 #1f4d3f}
+  .insp-empty{color:#9a948a;font-size:12.5px;line-height:1.8;margin-top:8px}
+  .insp-actions{display:flex;gap:6px;margin-top:14px;flex-wrap:wrap}
+  .ms-table{width:100%;border-collapse:collapse;font-size:12.5px;margin-top:4px}
+  .ms-table td{padding:5px 6px;border-bottom:1px solid #efede7}
+  .ms-table td:first-child{color:#8a867e;width:52px;font-variant-numeric:tabular-nums}
+
+  /* ---------- B 向导 ---------- */
+  .b-app{min-height:100vh;padding-top:26px;background:#f7f6f1}
+  .b-stepper{max-width:880px;margin:0 auto;display:flex;align-items:center;gap:0;padding:22px 20px 6px}
+  .b-step{display:flex;align-items:center;gap:8px;color:#a8a29a;font-size:13px}
+  .b-step .n{width:22px;height:22px;border-radius:50%;border:1px solid #d8d3c8;display:flex;align-items:center;justify-content:center;font-size:11.5px}
+  .b-step.on{color:#1c1c1e}
+  .b-step.on .n{background:#1f4d3f;border-color:#1f4d3f;color:#fff}
+  .b-step.done .n{background:#eef2ee;border-color:#c8d4c9;color:#1f4d3f}
+  .b-line{flex:1;height:1px;background:#e0dcd2;margin:0 12px}
+  .b-wrap{max-width:880px;margin:0 auto;padding:10px 20px 100px}
+  .b-card{background:#fff;border:1px solid #e6e2d9;border-radius:10px;padding:22px 24px}
+  .b-card h2{margin:0 0 4px;font-size:17px}
+  .b-card .sub{color:#8a867e;font-size:12.5px;margin-bottom:14px}
+  .b-input{width:100%;min-height:180px;border:1px solid #ddd8ce;border-radius:8px;padding:12px;font-size:13.5px;line-height:1.65;resize:vertical;outline:none;background:#fdfcf9}
+  .b-input:focus{border-color:#1f4d3f;box-shadow:0 0 0 3px rgba(31,77,63,.1)}
+  .b-bar{display:flex;align-items:center;justify-content:space-between;margin-top:10px}
+  .b-actions{display:flex;gap:8px;justify-content:flex-end;margin-top:14px}
+  .b-table{width:100%;border-collapse:collapse;font-size:12.5px;margin-top:6px}
+  .b-table th{text-align:left;font-weight:600;color:#8a867e;font-size:11px;padding:6px 8px;border-bottom:1px solid #e6e2d9;white-space:nowrap}
+  .b-table td{padding:7px 8px;border-bottom:1px solid #f0eee8;vertical-align:top}
+  .b-table tr:hover td{background:#fbfaf5}
+  .b-table .num{color:#9a948a;font-variant-numeric:tabular-nums;width:38px}
+  .b-table .name{font-weight:600;min-width:180px}
+  .b-table .acts{width:64px;text-align:right;white-space:nowrap}
+  .b-table .acts .icon-btn{width:22px;height:22px}
+  .b-phase td{background:#f6f4ee!important;font-weight:600;font-size:12px;color:#4a463f}
+  .b-modal{position:fixed;inset:0;background:rgba(20,18,14,.35);display:flex;align-items:center;justify-content:center;z-index:70}
+  .b-modal .box{width:480px;max-width:92vw;background:#fff;border-radius:12px;padding:20px 22px;box-shadow:0 20px 60px rgba(0,0,0,.25)}
+  .b-modal h3{margin:0 0 12px;font-size:15px}
+
+  /* ---------- C 文档流 ---------- */
+  .c-app{min-height:100vh;padding-top:26px;background:#fbfaf6}
+  .c-top{max-width:740px;margin:0 auto;display:flex;align-items:center;gap:10px;padding:16px 20px 0}
+  .c-top .spacer{flex:1}
+  .c-wrap{max-width:740px;margin:0 auto;padding:10px 20px 110px}
+  .c-empty{margin-top:12vh;text-align:center}
+  .c-empty h1{font-size:26px;margin:0 0 8px;letter-spacing:-.01em}
+  .c-empty p{color:#8a867e;font-size:13.5px;margin:0 0 26px;line-height:1.7}
+  .c-composer{border:1px solid #ddd8ce;border-radius:12px;background:#fff;padding:14px;box-shadow:0 2px 14px rgba(40,35,25,.04);text-align:left}
+  .c-composer textarea{width:100%;min-height:120px;border:0;outline:none;resize:vertical;font-size:13.5px;line-height:1.65;background:transparent}
+  .c-composer .row{display:flex;align-items:center;justify-content:space-between;margin-top:8px}
+  .c-doc{padding-top:6px}
+  .c-title{font-size:28px;font-weight:700;line-height:1.35;margin:0 0 6px;letter-spacing:-.01em;outline:none;border-radius:4px}
+  .c-title:focus{box-shadow:0 0 0 3px rgba(31,77,63,.12)}
+  .c-meta{font-size:12px;color:#9a948a;margin-bottom:20px}
+  .c-h{font-size:11.5px;letter-spacing:.08em;color:#8a867e;font-weight:600;margin:26px 0 8px}
+  .c-p{font-size:14px;line-height:1.75;margin:0 0 6px;outline:none;border-radius:4px}
+  .c-p:focus{box-shadow:0 0 0 3px rgba(31,77,63,.12)}
+  .c-task{position:relative;border-bottom:1px solid #eeece5;padding:9px 0 10px 26px}
+  .c-task .n{position:absolute;left:0;top:12px;font-size:11px;color:#a8a29a;font-variant-numeric:tabular-nums}
+  .c-task .name{font-weight:600;font-size:14px;outline:none;border-radius:3px;display:inline-block;min-width:60px}
+  .c-task .name:focus{box-shadow:0 0 0 3px rgba(31,77,63,.12)}
+  .c-task .meta{font-size:11.5px;color:#8a867e;margin-top:2px}
+  .c-task .desc,.c-task .acc{font-size:12px;color:#6d685e;line-height:1.55;margin-top:2px;outline:none;border-radius:3px}
+  .c-task .acc{color:#4d6b53}
+  .c-task .desc:focus,.c-task .acc:focus{box-shadow:0 0 0 3px rgba(31,77,63,.12)}
+  .c-task .tools{position:absolute;right:0;top:8px;display:flex;gap:2px;opacity:0;transition:.12s;background:#fbfaf6;padding-left:6px}
+  .c-task:hover .tools{opacity:1}
+  .c-phase-h{font-size:13px;font-weight:700;margin:22px 0 2px;color:#3c3831}
+  .c-phase-h span{color:#9a948a;font-weight:400;font-size:11px;margin-left:6px}
+
+  .menu{position:absolute;right:0;top:36px;background:#fff;border:1px solid #ddd8ce;border-radius:8px;box-shadow:0 10px 30px rgba(0,0,0,.12);padding:5px;min-width:190px;z-index:50}
+  .menu button{display:block;width:100%;text-align:left;padding:8px 10px;border-radius:6px;font-size:13px}
+  .menu button:hover{background:#f4f2ec}
+  .menu .cap{font-size:11px;color:#a8a29a;padding:6px 10px 2px}
+  .rel{position:relative}
+
+  .gen-wrap{display:flex;flex-direction:column;gap:14px}
+  .gen-stage{display:flex;align-items:center;gap:10px;font-size:13px;color:#4a463f}
+  .spinner{width:14px;height:14px;border:2px solid #cfd8d0;border-top-color:#1f4d3f;border-radius:50%;animation:sp .8s linear infinite}
+  @keyframes sp{to{transform:rotate(360deg)}}
+  .err-card{border:1px solid #f0d2d2;background:#fdf6f5;border-radius:10px;padding:18px 20px}
+  .err-card h3{margin:0 0 6px;font-size:14px;color:#a33b3b}
+  .err-card p{margin:0 0 4px;font-size:12.5px;color:#7a4a48;line-height:1.6}
+  .err-card .code{font-family:ui-monospace,Consolas,monospace;font-size:11.5px;color:#a33b3b;background:#fbeceb;padding:2px 6px;border-radius:4px}
+
+  @media print{
+    body{background:#fff}
+    .proto-strip,.proto-switcher,.toast,.a-top,.a-side,.a-insp,.b-stepper,.b-bar,.b-actions,.c-top,.c-empty,.c-composer,.c-task .tools,.task-actions,.icon-btn,.menu,.grip{display:none!important}
+    .a-app{padding-top:0;height:auto;display:block}
+    .a-main{padding:0;background:#fff;overflow:visible}
+    .a-doc{box-shadow:none;border:0;padding:0;max-width:none}
+    .b-wrap{padding:0;max-width:none}
+    .b-card{border:0;padding:0}
+    .b-table .acts{display:none}
+    .c-wrap{padding:0;max-width:none}
+    @page{size:A4;margin:17mm 15mm 15mm}
+    .doc-h{break-after:avoid}
+    .task,.c-task{break-inside:avoid}
+  }
+  @media (max-width:1100px){
+    .a-body{grid-template-columns:250px minmax(0,1fr)}
+    .a-insp{display:none}
+  }
+</style>
+</head>
+<body>
+<div class="proto-strip"><b>原型 · 抛弃物</b><span>不是最终设计，不做错误处理；底部胶囊切换变体与场景</span></div>
+<div id="app"></div>
+<div class="proto-switcher" id="switcher"></div>
+<script>
+(function(){
+  "use strict";
+
+  var VARIANTS = {
+    A: "工作台（三栏 + 检查器）",
+    B: "向导（三步 + 表格）",
+    C: "文档流（单列 + 行内编辑）"
+  };
+  var SCENARIOS = { plan: "已完成计划", empty: "空态", generating: "生成中", error: "失败" };
+  var NAMES = Object.keys(VARIANTS);
+
+  var params = new URLSearchParams(location.search);
+  var variant = NAMES.indexOf((params.get("variant") || "A").toUpperCase()) >= 0 ? (params.get("variant") || "A").toUpperCase() : "A";
+  var scenario = SCENARIOS[params.get("state")] ? params.get("state") : "plan";
+  var toastTimer = null;
+  var genTimer = null;
+  var genStageTimer = null;
+  var stageIndex = 0;
+  var autoComplete = false;
+
+  var plan = {
+    title: "官网迁移至 Astro + Sanity（中英双语）",
+    goal: "在 6 周内把现有 WordPress 官网迁移到 Astro + Sanity，保留英语并上线中文站，SEO 与性能不回退。",
+    background: "现站插件多、移动端首屏 4.2s，内容团队需要中英双轨发布。本次不改信息架构，只换技术栈与 CMS。",
+    risks: [
+      "Sanity 的本地化字段需要额外建模，可能拖慢内容录入",
+      "旧站 200+ URL 需要 301 映射，遗漏会掉排名",
+      "双语文案由市场部提供，排期不确定"
+    ],
+    milestones: [
+      { name: "技术选型与脚手架", week: "W1" },
+      { name: "内容模型与迁移脚本", week: "W2" },
+      { name: "页面迁移与双语联调", week: "W4" },
+      { name: "上线与观测", week: "W6" }
+    ],
+    acceptance: [
+      "Lighthouse 移动端性能 ≥ 90，桌面 ≥ 95",
+      "核心 30 条 URL 的 301 全部命中",
+      "中英切换无死链、无漏译页面",
+      "内容团队可独立发布一篇双语文章"
+    ],
+    phases: [
+      {
+        title: "阶段 1 · 地基",
+        tasks: [
+          { id: "t1", title: "确认技术选型与托管方案", p: "P0", h: 4, deps: [], acc: "Astro 版本、Sanity 套餐、托管商三项签字确认", desc: "对比 Astro 与 Next 的静态化路径，确认 Sanity 免费额度够用。" },
+          { id: "t2", title: "搭脚手架与部署流水线", p: "P0", h: 6, deps: ["t1"], acc: "预览环境可访问，push 自动构建", desc: "Astro 基础模板、Sanity Studio 接入、Vercel 预览环境。" },
+          { id: "t3", title: "拆旧站页面清单与 URL 映射表", p: "P1", h: 5, deps: [], acc: "200+ URL 全部有目标或 410 决策", desc: "爬旧站生成清单，标注保留/合并/下线。" }
+        ]
+      },
+      {
+        title: "阶段 2 · 内容模型",
+        tasks: [
+          { id: "t4", title: "设计 Sanity schema", p: "P0", h: 6, deps: ["t2"], acc: "页面、文章、作者、双语字段四类 schema 评审通过", desc: "页面区块化，文章复用，语言字段用 document-level i18n。" },
+          { id: "t5", title: "写 WordPress 导出脚本", p: "P1", h: 8, deps: ["t3"], acc: "全量文章与媒体导入试跑无丢失", desc: "REST API 拉取，转 Portable Text，媒体走 CDN。" },
+          { id: "t6", title: "双语字段与回退策略", p: "P1", h: 3, deps: ["t4"], acc: "缺译文时回退英文且 URL 不 404", desc: "语言路由 /en /zh，hreflang 与 canonical。" }
+        ]
+      },
+      {
+        title: "阶段 3 · 迁移与上线",
+        tasks: [
+          { id: "t7", title: "迁移首页与产品页", p: "P0", h: 8, deps: ["t4", "t5"], acc: "像素级对照通过，Lighthouse ≥ 90", desc: "先静态区块，再补交互组件。" },
+          { id: "t8", title: "迁移博客列表与详情", p: "P1", h: 6, deps: ["t5"], acc: "分页、标签、RSS 与旧站一致", desc: "Portable Text 渲染与代码高亮。" },
+          { id: "t9", title: "301 与 sitemap 落地", p: "P0", h: 4, deps: ["t3", "t7", "t8"], acc: "30 条核心 URL 抽查全绿", desc: "Netlify/Vercel 规则 + sitemap 提交。" },
+          { id: "t10", title: "双语内容 QA", p: "P1", h: 5, deps: ["t6", "t8"], acc: "抽样 40 页无漏译、无布局溢出", desc: "中英并排走查，记录问题清单。" },
+          { id: "t11", title: "切流量与观测", p: "P0", h: 5, deps: ["t9", "t10"], acc: "DNS 切换后 24h 无 5xx，排名无异常", desc: "灰度 10% → 50% → 100%，留回滚开关。" }
+        ]
+      }
+    ]
+  };
+
+  var flat = [];
+  plan.phases.forEach(function(ph, pi){
+    ph.tasks.forEach(function(t, ti){
+      flat.push({ t: t, pi: pi, ti: ti, no: (pi + 1) + "." + (ti + 1) });
+    });
+  });
+  function byId(id){ for (var i = 0; i < flat.length; i++){ if (flat[i].t.id === id) return flat[i]; } return null; }
+  function tasksOf(pi){ return plan.phases[pi].tasks; }
+  function phaseHours(ph){ return ph.tasks.reduce(function(s, t){ return s + t.h; }, 0); }
+  function esc(s){ return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;"); }
+  function p0(p){ return p === "P0" ? "p0" : p === "P1" ? "p1" : "p2"; }
+  function depsText(t){
+    if (!t.deps || !t.deps.length) return "无依赖";
+    return "依赖 " + t.deps.map(function(id){ var x = byId(id); return x ? x.no : id; }).join("、");
+  }
+  function toast(msg){
+    var old = document.querySelector(".toast"); if (old) old.remove();
+    var d = document.createElement("div"); d.className = "toast"; d.textContent = msg; document.body.appendChild(d);
+    clearTimeout(toastTimer); toastTimer = setTimeout(function(){ d.remove(); }, 2400);
+  }
+  function setParam(k, v){
+    try {
+      var u = new URL(location.href);
+      if (v) u.searchParams.set(k, v); else u.searchParams.delete(k);
+      history.replaceState(null, "", u.toString());
+    } catch (err) { /* file:// 下 replaceState 可能被拒，忽略 */ }
+  }
+  function renumber(){ flat = []; plan.phases.forEach(function(ph, pi){ ph.tasks.forEach(function(t, ti){ flat.push({ t: t, pi: pi, ti: ti, no: (pi + 1) + "." + (ti + 1) }); }); }); }
+  function syncUrl(){ setParam("variant", variant); if (scenario !== "plan") setParam("state", scenario); else setParam("state", null); }
+
+  function composerHTML(prefix, big){
+    var sample = "下周要把官网迁到新框架，原来的 WordPress 太慢。需要：保留英文站、上线中文、把博客和产品页搬过去、SEO 别掉、6 周内上线，两个人做。";
+    return '<div class="c-composer" style="' + (big ? "" : "") + '">' +
+      '<textarea data-role="input" placeholder="把任务原文粘贴进来（≤ 20,000 字符）">' + esc(sample) + '</textarea>' +
+      '<div class="row"><span class="tiny muted" data-role="count">0 / 20,000</span>' +
+      '<span style="display:flex;gap:8px;align-items:center">' +
+      '<button class="btn btn-ghost tiny" data-act="clear">清空</button>' +
+      '<button class="btn btn-primary" data-act="generate">生成计划 →</button></span></div></div>';
+  }
+
+  function bindComposer(root){
+    var ta = root.querySelector('[data-role="input"]'); if (!ta) return;
+    var count = root.querySelector('[data-role="count"]');
+    function upd(){
+      var n = ta.value.length;
+      count.textContent = n.toLocaleString("zh-CN") + " / 20,000";
+      count.classList.toggle("over", n > 20000);
+      var g = root.querySelector('[data-act="generate"]');
+      if (g) g.disabled = n > 20000 || n === 0;
+    }
+    ta.addEventListener("input", upd);
+    upd();
+  }
+
+  function startGenerate(){
+    autoComplete = true; stageIndex = 0; scenario = "generating"; syncUrl(); render();
+  }
+
+  function skeletonRows(n){
+    var out = "";
+    for (var i = 0; i < n; i++){
+      out += '<div style="margin:14px 0"><div class="skeleton" style="height:14px;width:' + (30 + (i * 17) % 50) + '%"></div>' +
+        '<div class="skeleton" style="height:10px;width:' + (50 + (i * 23) % 40) + '%;margin-top:7px"></div></div>';
+    }
+    return out;
+  }
+
+  /* ================= A 工作台 ================= */
+  var selectedA = null;
+  var dragSrc = null;
+
+  function renderA(app){
+    var side = '<aside class="a-side">' +
+      '<div class="block"><h4>输入</h4>' + composerHTML("a") + '</div>' +
+      '<div class="block" style="border-bottom:0">' +
+        '<h4>说明</h4>' +
+        '<div class="empty-note" style="font-size:12px">历史已挪到顶栏下拉；一次只编辑一份计划。生成后可选中任务在右侧改，或拖动行排序。</div>' +
+      '</div></aside>';
+
+    var doc = '<div class="a-doc">' + docInnerA() + '</div>';
+    var main;
+    if (scenario === "empty"){
+      main = '<div style="display:flex;align-items:center;justify-content:center;height:100%;text-align:center">' +
+        '<div><div style="font-size:15px;font-weight:600;margin-bottom:6px">还没有计划</div>' +
+        '<div class="empty-note">在左侧粘贴任务原文，点「生成计划」。<br>生成后会出现在这里，可逐条修改。</div></div></div>';
+    } else if (scenario === "generating"){
+      main = '<div class="a-doc"><div class="gen-stage"><span class="spinner"></span><span data-role="stage">正在整理输入…</span></div>' + skeletonRows(6) + '</div>';
+    } else if (scenario === "error"){
+      main = '<div class="a-doc">' + errorCardHTML() + '</div>';
+    } else {
+      main = doc;
+    }
+
+    var insp = '<aside class="a-insp">' + inspectorHTML() + '</aside>';
+
+    app.innerHTML = '<div class="a-app">' +
+      '<div class="a-top"><div class="a-brand">任务排版器<span>原型</span></div>' +
+        '<div class="spacer"></div>' +
+        '<span class="rel" data-role="hist"><button class="btn btn-ghost tiny" data-act="hist-toggle">历史 3 ▾</button>' +
+          '<div class="menu" data-role="hist-menu" style="display:none;min-width:240px">' +
+            '<div class="cap">最近</div>' +
+            '<button data-act="hist-load" data-msg="原型：加载「' + esc(plan.title) + '」">' + esc(plan.title) + '<span class="tiny muted"> · 刚刚</span></button>' +
+            '<button data-act="hist-load" data-msg="原型：加载「Q3 内容日历重排」">Q3 内容日历重排<span class="tiny muted"> · 昨天</span></button>' +
+            '<button data-act="hist-load" data-msg="原型：加载「官网改版（旧版）」">官网改版（旧版）<span class="tiny muted"> · 3 天前</span></button>' +
+          '</div></span>' +
+        '<button class="btn btn-ghost tiny" data-act="toast" data-msg="原型未含设置页">设置</button>' +
+        exportBtnHTML() +
+      '</div>' +
+      '<div class="a-body">' + side + '<div class="a-main">' + main + '</div>' + insp + '</div></div>';
+
+    bindComposer(app);
+    bindExport(app);
+    bindHistMenu(app);
+    bindTasksA(app);
+  }
+
+  function docInnerA(){
+    var h = '<div class="doc-title">' + esc(plan.title) + '</div>' +
+      '<div class="doc-meta">3 个阶段 · 11 个任务 · 54h · 6 周 · 生成于今天 14:32</div>' +
+      '<div class="doc-h">目标</div><p class="doc-goal">' + esc(plan.goal) + '</p>' +
+      '<div class="doc-h">背景</div><p class="doc-goal" style="font-size:13px;color:#4a463f">' + esc(plan.background) + '</p>';
+
+    plan.phases.forEach(function(ph, pi){
+      h += '<div class="phase" data-phase-wrap="' + pi + '"><div class="phase-title" draggable="true" data-phase="' + pi + '" title="拖动调整阶段顺序"><span class="grip">⋮⋮</span><span>' + esc(ph.title) + '</span><span class="h">' + ph.tasks.length + ' 任务 · ' + phaseHours(ph) + 'h</span></div>';
+      ph.tasks.forEach(function(t, ti){
+        var on = selectedA && selectedA.t.id === t.id;
+        h += '<div class="task' + (on ? " on" : "") + '" draggable="true" data-act="select" data-pi="' + pi + '" data-ti="' + ti + '">' +
+          '<div class="task-line"><span class="task-num">' + (pi + 1) + "." + (ti + 1) + '</span>' +
+          '<span class="task-name">' + esc(t.title) + '</span>' +
+          '<span class="badge ' + p0(t.p) + '">' + t.p + '</span>' +
+          '<span class="task-meta">' + t.h + 'h · ' + depsText(t) + '</span>' +
+          '<span class="task-actions">' +
+            '<button class="icon-btn" title="重新生成" data-act="regen" data-id="' + t.id + '">↻</button>' +
+            '<button class="icon-btn" title="删除" data-act="del" data-id="' + t.id + '">✕</button>' +
+          '</span></div>' +
+          (t.desc ? '<div class="task-desc">' + esc(t.desc) + '</div>' : "") +
+          (t.acc ? '<div class="task-acc">验收：' + esc(t.acc) + '</div>' : "") +
+        '</div>';
+      });
+      h += '</div>';
+    });
+
+    h += '<div class="doc-h">里程碑</div><table class="ms-table">' + plan.milestones.map(function(m){
+      return '<tr><td>' + esc(m.week) + '</td><td>' + esc(m.name) + '</td></tr>';
+    }).join("") + '</table>';
+
+    h += '<div class="doc-h">风险与假设</div><ul style="margin:0;padding-left:18px;font-size:13px;line-height:1.8;color:#4a463f">' +
+      plan.risks.map(function(r){ return '<li>' + esc(r) + '</li>'; }).join("") + '</ul>';
+
+    h += '<div class="doc-h">验收标准</div><ul style="margin:0;padding-left:18px;font-size:13px;line-height:1.8;color:#4a463f">' +
+      plan.acceptance.map(function(r){ return '<li>' + esc(r) + '</li>'; }).join("") + '</ul>';
+    return h;
+  }
+
+  function inspectorHTML(){
+    if (!selectedA) return '<div class="head"><b>检查器</b></div><div class="insp-empty">点左侧任意任务行，在这里改字段。<br><br>这里测试的是「先选中、再改字段」的编辑方式：比行内编辑慢，但字段约束（优先级、工时、依赖）更好控。</div>';
+    var t = selectedA.t, ref = selectedA;
+    return '<div class="head"><b>任务 ' + ref.no + '</b><span class="tiny muted">阶段 ' + (ref.pi + 1) + '</span></div>' +
+      '<div class="field"><label>标题</label><input type="text" data-field="title" value="' + esc(t.title) + '"></div>' +
+      '<div class="field"><label>说明</label><textarea data-field="desc" rows="3">' + esc(t.desc || "") + '</textarea></div>' +
+      '<div class="field"><label>验收标准</label><textarea data-field="acc" rows="2">' + esc(t.acc || "") + '</textarea></div>' +
+      '<div style="display:flex;gap:10px">' +
+        '<div class="field" style="flex:1"><label>优先级</label><input type="text" data-field="p" value="' + esc(t.p) + '"></div>' +
+        '<div class="field" style="flex:1"><label>工时</label><input type="number" data-field="h" value="' + t.h + '"></div>' +
+      '</div>' +
+      '<div class="field"><label>依赖（任务编号，逗号分隔）</label><input type="text" data-field="deps" value="' + esc(t.deps.map(function(id){ var x = byId(id); return x ? x.no : id; }).join(", ")) + '"></div>' +
+      '<div class="insp-actions">' +
+        '<button class="btn" data-act="regen" data-id="' + t.id + '">↻ 重新生成</button>' +
+        '<button class="btn" data-act="addchild" data-id="' + t.id + '">+ 加子任务</button>' +
+        '<button class="btn" data-act="del" data-id="' + t.id + '">删除</button>' +
+      '</div>';
+  }
+
+  function moveTask(src, dstPi, dstIndex){
+    if (!plan.phases[dstPi]) return;
+    var task = plan.phases[src.pi].tasks.splice(src.ti, 1)[0];
+    if (!task) return;
+    if (src.pi === dstPi && src.ti < dstIndex) dstIndex--;
+    if (dstIndex < 0) dstIndex = 0;
+    if (dstIndex > plan.phases[dstPi].tasks.length) dstIndex = plan.phases[dstPi].tasks.length;
+    plan.phases[dstPi].tasks.splice(dstIndex, 0, task);
+    renumber();
+    var found = null;
+    plan.phases.forEach(function(ph, pi){ ph.tasks.forEach(function(t, ti){ if (t.id === task.id) found = { t: t, pi: pi, ti: ti }; }); });
+    selectedA = found ? { t: found.t, pi: found.pi, ti: found.ti, no: (found.pi + 1) + "." + (found.ti + 1) } : null;
+    render();
+    toast("已移动「" + task.title + "」");
+  }
+
+  function movePhase(from, to){
+    if (from === to) return;
+    var ph = plan.phases.splice(from, 1)[0];
+    if (from < to) to--;
+    if (to < 0) to = 0;
+    plan.phases.splice(to, 0, ph);
+    renumber();
+    selectedA = null;
+    render();
+    toast("已调整阶段顺序");
+  }
+
+  function bindHistMenu(app){
+    var wrap = app.querySelector('[data-role="hist"]'); if (!wrap) return;
+    var menu = wrap.querySelector('[data-role="hist-menu"]');
+    app.addEventListener("click", function(e){
+      var t = e.target.closest ? e.target.closest("[data-act]") : null; if (!t) return;
+      var act = t.getAttribute("data-act");
+      if (act === "hist-toggle"){ e.stopPropagation(); menu.style.display = menu.style.display === "none" ? "block" : "none"; }
+      else if (act === "hist-load"){ menu.style.display = "none"; toast(t.getAttribute("data-msg") || "原型"); }
+    });
+    document.addEventListener("click", function(e){ if (!wrap.contains(e.target)) menu.style.display = "none"; });
+  }
+
+  function bindTasksA(app){
+    var dragMoved = false;
+    app.addEventListener("click", function(e){
+      if (dragMoved){ dragMoved = false; return; }
+      var el = e.target.closest ? e.target.closest("[data-act]") : null;
+      if (!el) return;
+      var act = el.getAttribute("data-act");
+      if (act === "select"){
+        var pi = +el.getAttribute("data-pi"), ti = +el.getAttribute("data-ti");
+        selectedA = { t: tasksOf(pi)[ti], pi: pi, ti: ti, no: (pi + 1) + "." + (ti + 1) };
+        render();
+      } else if (act === "regen"){
+        var r = byId(el.getAttribute("data-id"));
+        toast("原型演示：将对「" + r.t.title + "」调用单节点重生成");
+      } else if (act === "del"){
+        var d = byId(el.getAttribute("data-id"));
+        if (d){ plan.phases[d.pi].tasks.splice(d.ti, 1); selectedA = null; renumber(); render(); toast("已删除「" + d.t.title + "」（原型，不写库）"); }
+      } else if (act === "addchild"){
+        var a = byId(el.getAttribute("data-id"));
+        var nt = { id: "t" + (Date.now() % 100000), title: "新任务", p: "P1", h: 2, deps: [], acc: "", desc: "" };
+        plan.phases[a.pi].tasks.splice(a.ti + 1, 0, nt); renumber(); render(); toast("已插入一行（原型）");
+      } else if (act === "toggle-hist"){
+        toast("原型：历史在顶栏下拉里");
+      } else if (act === "toast"){
+        toast(el.getAttribute("data-msg") || "原型");
+      }
+    });
+
+    /* ---- 拖拽排序（任务跨阶段移动 / 阶段排序）---- */
+    function clearDropMarks(){
+      var ns = app.querySelectorAll(".dragging,.drop-before,.drop-after,.drop-phase");
+      for (var i = 0; i < ns.length; i++) ns[i].classList.remove("dragging", "drop-before", "drop-after", "drop-phase");
+    }
+    app.addEventListener("dragstart", function(e){
+      var ph = e.target.closest ? e.target.closest(".phase-title[data-phase]") : null;
+      var row = e.target.closest ? e.target.closest(".task[data-pi]") : null;
+      if (ph && !row){
+        dragSrc = { kind: "phase", pi: +ph.getAttribute("data-phase") };
+        ph.classList.add("dragging");
+      } else if (row){
+        dragSrc = { kind: "task", pi: +row.getAttribute("data-pi"), ti: +row.getAttribute("data-ti") };
+        row.classList.add("dragging");
+      } else return;
+      dragMoved = true;
+      try { e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", "x"); } catch (err) {}
+    });
+    app.addEventListener("dragend", function(){ clearDropMarks(); dragSrc = null; setTimeout(function(){ dragMoved = false; }, 350); });
+    app.addEventListener("dragover", function(e){
+      if (!dragSrc) return;
+      var row = e.target.closest ? e.target.closest(".task[data-pi]") : null;
+      var ph = e.target.closest ? e.target.closest(".phase-title[data-phase]") : null;
+      if (row){
+        e.preventDefault(); e.dataTransfer.dropEffect = "move";
+        row.classList.remove("drop-before", "drop-after");
+        var r = row.getBoundingClientRect();
+        row.classList.add(e.clientY > r.top + r.height / 2 ? "drop-after" : "drop-before");
+      } else if (ph && dragSrc.kind === "phase"){
+        e.preventDefault(); e.dataTransfer.dropEffect = "move";
+        ph.classList.add("drop-phase");
+      }
+    });
+    app.addEventListener("dragleave", function(e){
+      var row = e.target.closest ? e.target.closest(".task[data-pi]") : null;
+      if (row) row.classList.remove("drop-before", "drop-after");
+      var ph = e.target.closest ? e.target.closest(".phase-title[data-phase]") : null;
+      if (ph) ph.classList.remove("drop-phase");
+    });
+    app.addEventListener("drop", function(e){
+      if (!dragSrc) return;
+      var row = e.target.closest ? e.target.closest(".task[data-pi]") : null;
+      var ph = e.target.closest ? e.target.closest(".phase-title[data-phase]") : null;
+      if (row && dragSrc.kind === "task"){
+        e.preventDefault();
+        var r = row.getBoundingClientRect();
+        var after = e.clientY > r.top + r.height / 2;
+        moveTask(dragSrc, +row.getAttribute("data-pi"), +row.getAttribute("data-ti") + (after ? 1 : 0));
+      } else if (row && dragSrc.kind === "phase"){
+        e.preventDefault();
+        movePhase(dragSrc.pi, +row.getAttribute("data-pi"));
+      } else if (ph && dragSrc.kind === "phase"){
+        e.preventDefault();
+        movePhase(dragSrc.pi, +ph.getAttribute("data-phase"));
+      } else if (ph && dragSrc.kind === "task"){
+        e.preventDefault();
+        moveTask(dragSrc, +ph.getAttribute("data-phase"), plan.phases[+ph.getAttribute("data-phase")].tasks.length);
+      }
+      clearDropMarks(); dragSrc = null;
+    });
+
+    app.addEventListener("input", function(e){
+      var el = e.target;
+      if (!el.getAttribute || !el.getAttribute("data-field") || !selectedA) return;
+      var f = el.getAttribute("data-field");
+      if (f === "h") selectedA.t.h = Math.max(0, +el.value || 0);
+      else if (f === "deps"){
+        var ids = el.value.split(/[,，\s]+/).map(function(s){ return s.trim(); }).filter(Boolean).map(function(no){
+          var f2 = flat.filter(function(x){ return x.no === no; })[0]; return f2 ? f2.t.id : null;
+        }).filter(Boolean);
+        selectedA.t.deps = ids;
+      } else selectedA.t[f] = el.value;
+      var row = document.querySelector('.task.on');
+      if (row && f === "title") row.querySelector(".task-name").textContent = el.value;
+      if (row && f === "h") row.querySelector(".task-meta").textContent = selectedA.t.h + "h · " + depsText(selectedA.t);
+    });
+  }
+
+  /* ================= B 向导 ================= */
+  function renderB(app){
+    var step = scenario === "empty" || scenario === "error" ? 1 : scenario === "generating" ? 2 : 3;
+    var stepper = '<div class="b-stepper">' +
+      bStep(1, "粘贴任务", step) + '<div class="b-line"></div>' +
+      bStep(2, "生成", step) + '<div class="b-line"></div>' +
+      bStep(3, "编辑与导出", step) + '</div>';
+
+    var body;
+    if (step === 1){
+      body = '<div class="b-card"><h2>粘贴任务原文</h2><div class="sub">越具体越好：目标、约束、时间、人手。生成后可逐条修改。</div>' +
+        '<textarea class="b-input" data-role="input" placeholder="把任务原文粘贴进来…"></textarea>' +
+        '<div class="b-bar"><span class="tiny muted" data-role="count">0 / 20,000</span>' +
+        '<span style="display:flex;gap:8px"><button class="btn btn-ghost" data-act="toast" data-msg="原型：可放示例文本">填入示例</button>' +
+        '<button class="btn btn-primary" data-act="generate">生成计划</button></span></div></div>' +
+        '<div class="tiny muted" style="text-align:center;margin-top:10px">或从历史里选一个：Q3 内容日历重排 · 官网改版（旧版）</div>';
+      if (scenario === "error") body = errorCardHTML();
+    } else if (step === 2){
+      body = '<div class="b-card"><h2>正在生成</h2><div class="sub">一次调用完成；失败会自动本地修复并重试一次。</div>' +
+        '<div class="gen-stage" style="margin:18px 0 6px"><span class="spinner"></span><span data-role="stage">正在整理输入…</span></div>' +
+        skeletonRows(5) + '</div>';
+    } else {
+      body = '<div class="b-card"><div style="display:flex;align-items:baseline;justify-content:space-between">' +
+        '<h2>' + esc(plan.title) + '</h2><span class="tiny muted">11 任务 · 54h · 6 周</span></div>' +
+        '<div class="sub">双击任意行编辑；↑↓ 调顺序；每行可重生成或删除。</div>' +
+        '<table class="b-table"><thead><tr><th class="num">#</th><th>任务</th><th>P</th><th>工时</th><th>依赖</th><th>验收</th><th class="acts"></th></tr></thead><tbody>' +
+        plan.phases.map(function(ph, pi){
+          return '<tr class="b-phase"><td colspan="7">' + esc(ph.title) + ' · ' + ph.tasks.length + ' 任务 · ' + phaseHours(ph) + 'h</td></tr>' +
+            ph.tasks.map(function(t, ti){
+              return '<tr data-act="row" data-pi="' + pi + '" data-ti="' + ti + '"><td class="num">' + (pi + 1) + "." + (ti + 1) + '</td>' +
+                '<td class="name">' + esc(t.title) + '<div class="tiny muted" style="font-weight:400;margin-top:2px">' + esc(t.desc || "") + '</div></td>' +
+                '<td><span class="badge ' + p0(t.p) + '">' + t.p + '</span></td><td>' + t.h + 'h</td>' +
+                '<td class="tiny">' + depsText(t) + '</td><td class="tiny">' + esc(t.acc || "—") + '</td>' +
+                '<td class="acts"><button class="icon-btn" data-act="up" data-pi="' + pi + '" data-ti="' + ti + '">↑</button>' +
+                '<button class="icon-btn" data-act="down" data-pi="' + pi + '" data-ti="' + ti + '">↓</button>' +
+                '<button class="icon-btn" data-act="regen" data-id="' + t.id + '">↻</button>' +
+                '<button class="icon-btn" data-act="del" data-id="' + t.id + '">✕</button></td></tr>';
+            }).join("");
+        }).join("") + '</tbody></table>' +
+        '<div class="b-actions"><button class="btn" data-act="add">+ 新增任务</button>' +
+        '<button class="btn" data-act="toast" data-msg="原型：回到第 1 步重新生成会丢弃当前编辑">重新生成全部</button>' +
+        exportBtnHTML() + '</div>' +
+        '<div class="tiny muted" style="margin-top:10px">目标：' + esc(plan.goal) + '</div>' +
+      '</div>';
+    }
+
+    app.innerHTML = '<div class="b-app">' + stepper + '<div class="b-wrap">' + body + '</div></div>';
+    bindComposer(app);
+    bindExport(app);
+    bindTasksB(app);
+  }
+
+  function bStep(n, label, step){
+    var cls = step === n ? "on" : step > n ? "done" : "";
+    return '<div class="b-step ' + cls + '"><span class="n">' + (step > n ? "✓" : n) + '</span>' + label + '</div>';
+  }
+
+  function bindTasksB(app){
+    app.addEventListener("click", function(e){
+      var el = e.target.closest ? e.target.closest("[data-act]") : null;
+      if (!el) return;
+      var act = el.getAttribute("data-act");
+      if (act === "up" || act === "down"){
+        var pi = +el.getAttribute("data-pi"), ti = +el.getAttribute("data-ti");
+        var arr = tasksOf(pi); var j = act === "up" ? ti - 1 : ti + 1;
+        if (j >= 0 && j < arr.length){ var tmp = arr[ti]; arr[ti] = arr[j]; arr[j] = tmp; renumber(); render(); }
+      } else if (act === "regen"){
+        var r = byId(el.getAttribute("data-id")); toast("原型演示：将对「" + r.t.title + "」调用单节点重生成");
+      } else if (act === "del"){
+        var d = byId(el.getAttribute("data-id")); plan.phases[d.pi].tasks.splice(d.ti, 1); renumber(); render();
+      } else if (act === "add"){
+        plan.phases[plan.phases.length - 1].tasks.push({ id: "t" + (Date.now() % 100000), title: "新任务", p: "P1", h: 2, deps: [], acc: "", desc: "" });
+        renumber(); render();
+      } else if (act === "toast"){ toast(el.getAttribute("data-msg") || "原型"); }
+    });
+    app.addEventListener("dblclick", function(e){
+      var row = e.target.closest ? e.target.closest("[data-act=row]") : null;
+      if (row) openEditModal(+row.getAttribute("data-pi"), +row.getAttribute("data-ti"));
+    });
+  }
+
+  function openEditModal(pi, ti){
+    var t = tasksOf(pi)[ti];
+    var m = document.createElement("div"); m.className = "b-modal";
+    m.innerHTML = '<div class="box"><h3>编辑任务 ' + (pi + 1) + "." + (ti + 1) + '</h3>' +
+      '<div class="field"><label>标题</label><input type="text" id="m-title" value="' + esc(t.title) + '"></div>' +
+      '<div class="field"><label>说明</label><textarea id="m-desc" rows="3">' + esc(t.desc || "") + '</textarea></div>' +
+      '<div class="field"><label>验收标准</label><textarea id="m-acc" rows="2">' + esc(t.acc || "") + '</textarea></div>' +
+      '<div style="display:flex;gap:10px">' +
+        '<div class="field" style="flex:1"><label>优先级</label><input type="text" id="m-p" value="' + esc(t.p) + '"></div>' +
+        '<div class="field" style="flex:1"><label>工时</label><input type="number" id="m-h" value="' + t.h + '"></div></div>' +
+      '<div style="display:flex;justify-content:flex-end;gap:8px;margin-top:8px">' +
+        '<button class="btn" id="m-cancel">取消</button><button class="btn btn-primary" id="m-save">保存</button></div></div>';
+    document.body.appendChild(m);
+    m.querySelector("#m-cancel").onclick = function(){ m.remove(); };
+    m.querySelector("#m-save").onclick = function(){
+      t.title = m.querySelector("#m-title").value;
+      t.desc = m.querySelector("#m-desc").value;
+      t.acc = m.querySelector("#m-acc").value;
+      t.p = m.querySelector("#m-p").value;
+      t.h = +m.querySelector("#m-h").value || 0;
+      m.remove(); render(); toast("已保存（原型，不写库）");
+    };
+  }
+
+  /* ================= C 文档流 ================= */
+  function renderC(app){
+    var top = '<div class="c-top"><div style="font-weight:700">任务排版器</div><div class="spacer"></div>' +
+      '<button class="btn btn-ghost tiny" data-act="toast" data-msg="原型：历史用下拉切换，不并排">历史</button>' +
+      (scenario === "plan" ? exportBtnHTML() : "") + '</div>';
+
+    var body;
+    if (scenario === "empty"){
+      body = '<div class="c-empty"><h1>把任务丢进来，<br>换一份能排期的计划书。</h1>' +
+        '<p>粘贴一段任务描述，生成目标、任务树、优先级、工时与验收标准。<br>生成后可直接在页面上改。</p>' +
+        composerHTML("c", true) + '</div>';
+    } else if (scenario === "generating"){
+      body = '<div class="c-doc" style="margin-top:40px"><div class="gen-stage"><span class="spinner"></span><span data-role="stage">正在整理输入…</span></div>' +
+        '<div style="margin-top:26px">' + skeletonRows(5) + '</div></div>';
+    } else if (scenario === "error"){
+      body = '<div class="c-doc" style="margin-top:36px">' + errorCardHTML() + '</div>';
+    } else {
+      body = '<div class="c-doc">' + docInnerC() + '</div>';
+    }
+    app.innerHTML = '<div class="c-app">' + top + '<div class="c-wrap">' + body + '</div></div>';
+    bindComposer(app);
+    bindExport(app);
+    bindTasksC(app);
+  }
+
+  function docInnerC(){
+    var h = '<div class="c-title" contenteditable="true" data-ce="title">' + esc(plan.title) + '</div>' +
+      '<div class="c-meta">3 个阶段 · 11 个任务 · 54h · 6 周 · 今天 14:32 生成</div>' +
+      '<div class="c-h">目标</div><div class="c-p" contenteditable="true" data-ce="goal">' + esc(plan.goal) + '</div>' +
+      '<div class="c-h">背景</div><div class="c-p" contenteditable="true" data-ce="background" style="font-size:13px;color:#4a463f">' + esc(plan.background) + '</div>';
+
+    plan.phases.forEach(function(ph, pi){
+      h += '<div class="c-phase-h">' + esc(ph.title) + '<span>' + ph.tasks.length + ' 任务 · ' + phaseHours(ph) + 'h</span></div>';
+      ph.tasks.forEach(function(t, ti){
+        h += '<div class="c-task" data-pi="' + pi + '" data-ti="' + ti + '">' +
+          '<span class="n">' + (pi + 1) + "." + (ti + 1) + '</span>' +
+          '<div class="name" contenteditable="true" data-ce="title">' + esc(t.title) + '</div>' +
+          '<div class="meta"><span class="badge ' + p0(t.p) + '">' + t.p + '</span> · ' + t.h + 'h · ' + depsText(t) + '</div>' +
+          '<div class="desc" contenteditable="true" data-ce="desc">' + esc(t.desc || "") + '</div>' +
+          '<div class="acc" contenteditable="true" data-ce="acc">验收：' + esc(t.acc || "") + '</div>' +
+          '<span class="tools"><button class="icon-btn" data-act="regen" data-id="' + t.id + '">↻</button>' +
+          '<button class="icon-btn" data-act="del" data-id="' + t.id + '">✕</button></span>' +
+        '</div>';
+      });
+    });
+
+    h += '<div class="c-h">里程碑</div>' + plan.milestones.map(function(m){
+      return '<div class="c-p" style="font-size:13px"><b style="font-variant-numeric:tabular-nums">' + esc(m.week) + '</b>　' + esc(m.name) + '</div>';
+    }).join("") +
+      '<div class="c-h">风险与假设</div>' + plan.risks.map(function(r){ return '<div class="c-p" style="font-size:13px">· ' + esc(r) + '</div>'; }).join("") +
+      '<div class="c-h">验收标准</div>' + plan.acceptance.map(function(r){ return '<div class="c-p" style="font-size:13px">· ' + esc(r) + '</div>'; }).join("");
+    return h;
+  }
+
+  function bindTasksC(app){
+    app.addEventListener("click", function(e){
+      var el = e.target.closest ? e.target.closest("[data-act]") : null;
+      if (!el) return;
+      var act = el.getAttribute("data-act");
+      if (act === "regen"){ var r = byId(el.getAttribute("data-id")); toast("原型演示：将对「" + r.t.title + "」调用单节点重生成"); }
+      else if (act === "del"){ var d = byId(el.getAttribute("data-id")); plan.phases[d.pi].tasks.splice(d.ti, 1); renumber(); render(); }
+      else if (act === "toast"){ toast(el.getAttribute("data-msg") || "原型"); }
+    });
+    app.addEventListener("blur", function(e){
+      var el = e.target;
+      if (!el.getAttribute || !el.getAttribute("data-ce")) return;
+      var f = el.getAttribute("data-ce");
+      if (f === "title" || f === "goal" || f === "background"){ plan[f] = el.textContent.trim(); }
+      else {
+        var task = el.closest("[data-pi]");
+        if (!task) return;
+        var pi = +task.getAttribute("data-pi"), ti = +task.getAttribute("data-ti");
+        var t = tasksOf(pi)[ti];
+        if (f === "acc") t.acc = el.textContent.replace(/^验收[：:]\s*/, "").trim();
+        else t[f] = el.textContent.trim();
+      }
+    }, true);
+  }
+
+  /* ================= 公用 ================= */
+  function errorCardHTML(){
+    return '<div class="err-card"><h3>这次没生成成功</h3>' +
+      '<p>模型输出被截断，计划不完整。<span class="code">finish_reason=length</span></p>' +
+      '<p class="tiny">已自动修复 1 次、重试 1 次，仍然失败。原文和你的编辑都还在，没有丢。</p>' +
+      '<div style="display:flex;gap:8px;margin-top:12px"><button class="btn" data-act="toast" data-msg="原型：会用同样的输入再试一次">重试</button>' +
+      '<button class="btn btn-ghost" data-act="toast" data-msg="原型：回到输入区，可精简原文">返回修改输入</button></div></div>';
+  }
+
+  function exportBtnHTML(){
+    return '<span class="rel" data-role="export"><button class="btn btn-primary" data-act="export">导出 ▾</button>' +
+      '<div class="menu" data-role="export-menu" style="display:none">' +
+      '<div class="cap">同源于当前计划</div>' +
+      '<button data-act="md">Markdown（.md）</button>' +
+      '<button data-act="pdf">PDF（打印）</button>' +
+      '<button data-act="toast" data-msg="原型：导出前可选择 A / B 版式">版式：文档 / 一页总览</button></div></span>';
+  }
+
+  function bindExport(app){
+    var wrap = app.querySelector('[data-role="export"]'); if (!wrap) return;
+    var menu = wrap.querySelector('[data-role="export-menu"]');
+    app.addEventListener("click", function(e){
+      var t = e.target.closest ? e.target.closest("[data-act]") : null; if (!t) return;
+      var act = t.getAttribute("data-act");
+      if (act === "export"){ e.stopPropagation(); menu.style.display = menu.style.display === "none" ? "block" : "none"; }
+      else if (act === "md"){ menu.style.display = "none"; toast("原型演示：将把当前计划导出为 Markdown"); }
+      else if (act === "pdf"){ menu.style.display = "none"; setTimeout(function(){ window.print(); }, 60); }
+    });
+    document.addEventListener("click", function(e){
+      if (!wrap.contains(e.target)) menu.style.display = "none";
+    });
+  }
+
+  /* ================= 路由与切换器 ================= */
+  function render(){
+    if (genTimer){ clearTimeout(genTimer); genTimer = null; }
+    var app = document.getElementById("app");
+    app.innerHTML = "";
+    if (variant === "A") renderA(app);
+    else if (variant === "B") renderB(app);
+    else renderC(app);
+    if (scenario === "generating" && autoComplete){ startGenerateAnimation(); }
+    renderSwitcher();
+  }
+
+  function startGenerateAnimation(){
+    stageIndex = 0;
+    clearInterval(genStageTimer);
+    genStageTimer = setInterval(function(){
+      stageIndex = Math.min(stageIndex + 1, 3);
+      var el = document.querySelector("[data-role=stage]");
+      if (el) el.textContent = ["正在整理输入…", "正在生成计划…", "正在校验结构…", "马上就好…"][stageIndex];
+    }, 650);
+    genTimer = setTimeout(function(){
+      clearInterval(genStageTimer); autoComplete = false; scenario = "plan"; syncUrl(); render();
+      toast("原型演示：这里会显示真实生成结果");
+    }, 2600);
+  }
+
+  function renderSwitcher(){
+    var sw = document.getElementById("switcher");
+    sw.innerHTML = '<button data-nav="prev" aria-label="上一个">‹</button>' +
+      '<span class="label">' + variant + ' · ' + VARIANTS[variant] + '</span>' +
+      '<button data-nav="next" aria-label="下一个">›</button>' +
+      '<select id="scenario-select" aria-label="场景">' +
+        Object.keys(SCENARIOS).map(function(k){ return '<option value="' + k + '"' + (k === scenario ? " selected" : "") + '>' + SCENARIOS[k] + '</option>'; }).join("") +
+      '</select>' +
+      '<span class="hint">← → 切换</span>';
+    sw.querySelector('[data-nav="prev"]').onclick = function(){ setVariant(NAMES[(NAMES.indexOf(variant) + NAMES.length - 1) % NAMES.length]); };
+    sw.querySelector('[data-nav="next"]').onclick = function(){ setVariant(NAMES[(NAMES.indexOf(variant) + 1) % NAMES.length]); };
+    sw.querySelector("#scenario-select").onchange = function(e){ autoComplete = false; scenario = e.target.value; syncUrl(); render(); };
+  }
+
+  function setVariant(v){
+    variant = v; syncUrl(); render();
+  }
+
+  document.addEventListener("keydown", function(e){
+    if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+    var el = document.activeElement;
+    if (el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable)) return;
+    e.preventDefault();
+    var i = NAMES.indexOf(variant);
+    setVariant(NAMES[(i + (e.key === "ArrowRight" ? 1 : NAMES.length - 1)) % NAMES.length]);
+  });
+
+  document.addEventListener("click", function(e){
+    var el = e.target.closest ? e.target.closest("[data-act]") : null;
+    if (!el) return;
+    var act = el.getAttribute("data-act");
+    if (act === "generate"){ startGenerate(); }
+    else if (act === "clear"){ var ta = document.querySelector('[data-role="input"]'); if (ta){ ta.value = ""; ta.dispatchEvent(new Event("input")); } }
+  });
+
+  render();
+})();
+</script>
+</body>
+</html>
