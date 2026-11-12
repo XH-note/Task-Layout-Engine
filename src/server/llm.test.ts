@@ -195,7 +195,7 @@ describe('callChatCompletion', () => {
     });
   });
 
-  it('maps aborts to a retryable timeout', async () => {
+  it('maps aborts to a timeout', async () => {
     const fetchImpl: FetchLike = async () => {
       const error = new Error('timed out');
       error.name = 'TimeoutError';
@@ -211,7 +211,31 @@ describe('callChatCompletion', () => {
     expect(failure).toMatchObject({
       code: 'PROVIDER_TIMEOUT',
       status: 504,
-      retryable: true,
+      retryable: false,
+    });
+  });
+
+  it('maps an aborted caller signal to cancellation, not timeout', async () => {
+    const controller = new AbortController();
+    controller.abort();
+    const fetchImpl: FetchLike = async () => {
+      throw new DOMException('Aborted', 'AbortError');
+    };
+
+    const failure = await callChatCompletion(
+      settings('json_object_prompted'),
+      {
+        messages: [{ role: 'user', content: 'hi' }],
+        signal: controller.signal,
+      },
+      { fetchImpl },
+    ).catch((error: unknown) => error);
+
+    expect(failure).toBeInstanceOf(AppError);
+    expect(failure).toMatchObject({
+      code: 'CANCELLED',
+      status: 499,
+      retryable: false,
     });
   });
 });

@@ -5,6 +5,7 @@ import {
   GenerationBusy,
   GenerationError,
   GenerationInterrupted,
+  GenerationNotice,
   GenerationProgress,
   RETAINED_SOURCE_NOTE,
 } from './GenerationFeedback';
@@ -83,10 +84,14 @@ export default function App() {
   const record = usePlanStore((state) => state.record);
   const generation = usePlanStore((state) => state.generation);
   const interrupted = usePlanStore((state) => state.interrupted);
+  const notice = usePlanStore((state) => state.notice);
   const restore = usePlanStore((state) => state.restore);
   const generate = usePlanStore((state) => state.generate);
+  const cancel = usePlanStore((state) => state.cancel);
+  const newPlan = usePlanStore((state) => state.newPlan);
   const dismissIssue = usePlanStore((state) => state.dismissIssue);
   const dismissInterrupted = usePlanStore((state) => state.dismissInterrupted);
+  const dismissNotice = usePlanStore((state) => state.dismissNotice);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const sourceState = getSourceState(source);
@@ -115,6 +120,13 @@ export default function App() {
   }, [source]);
 
   const handleClear = () => {
+    if (generating) cancel();
+    clearSource();
+    textareaRef.current?.focus();
+  };
+
+  const handleNewPlan = () => {
+    newPlan();
     clearSource();
     textareaRef.current?.focus();
   };
@@ -123,8 +135,14 @@ export default function App() {
     void generate(source);
   };
 
+  const handleCancel = () => {
+    cancel();
+    textareaRef.current?.focus();
+  };
+
   const handleBackToEdit = () => {
     dismissIssue();
+    dismissNotice();
     textareaRef.current?.focus();
   };
 
@@ -150,6 +168,9 @@ export default function App() {
         </div>
 
         <nav className="topbar-actions" aria-label="全局操作">
+          <button className="quiet-button" type="button" onClick={handleNewPlan}>
+            新建计划
+          </button>
           <button className="quiet-button" type="button" disabled title="历史记录将在后续切片接入">
             历史记录
             <span className="chevron" aria-hidden="true">
@@ -236,8 +257,15 @@ export default function App() {
               <GenerationInterrupted onDismiss={dismissInterrupted} />
             ) : null}
 
+            {notice && generation.phase === 'idle' ? (
+              <GenerationNotice message={notice} onDismiss={dismissNotice} />
+            ) : null}
+
             {generation.phase === 'generating' ? (
-              <GenerationProgress startedAt={generation.startedAt} />
+              <GenerationProgress
+                startedAt={generation.startedAt}
+                onCancel={handleCancel}
+              />
             ) : generation.phase === 'busy' ? (
               <>
                 <GenerationBusy
@@ -250,10 +278,11 @@ export default function App() {
             ) : generation.phase === 'failed' ? (
               <>
                 <GenerationError
-                  message={generation.message}
+                  failure={generation.failure}
                   canRetry={sourceState.canGenerate}
                   onRetry={handleGenerate}
                   onBack={handleBackToEdit}
+                  onOpenSettings={() => setSettingsOpen(true)}
                 />
                 {priorPlan}
               </>

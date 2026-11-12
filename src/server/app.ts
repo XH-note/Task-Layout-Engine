@@ -17,6 +17,7 @@ export interface AppDependencies {
   planStore?: PlanStore;
   testConnection?: (settings: ProviderConnectionSettings) => Promise<TestConnectionResult>;
   callModel?: CallModel;
+  sleep?: (ms: number) => Promise<void>;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -32,6 +33,7 @@ export function buildApp(options: FastifyServerOptions = {}, dependencies: AppDe
     settingsStore,
     planStore,
     ...(dependencies.callModel ? { callModel: dependencies.callModel } : {}),
+    ...(dependencies.sleep ? { sleep: dependencies.sleep } : {}),
   });
 
   app.setErrorHandler((error, request, reply) => {
@@ -121,9 +123,24 @@ export function buildApp(options: FastifyServerOptions = {}, dependencies: AppDe
 
   app.post('/api/generate', async (request, reply) => {
     const body = isRecord(request.body) ? request.body : {};
-    const record = await generation.generate(body.source);
+    const controller = new AbortController();
+    const abortIfDisconnected = () => {
+      if (!reply.raw.writableEnded) controller.abort();
+    };
 
-    return reply.code(201).send({ record });
+    request.raw.once('aborted', abortIfDisconnected);
+    reply.raw.once('close', abortIfDisconnected);
+
+    try {
+      const record = await generation.generate(body.source, {
+        signal: controller.signal,
+      });
+
+      return reply.code(201).send({ record });
+    } finally {
+      request.raw.off('aborted', abortIfDisconnected);
+      reply.raw.off('close', abortIfDisconnected);
+    }
   });
 
   app.get<{ Params: { id: string } }>('/api/plans/:id', async (request) => {

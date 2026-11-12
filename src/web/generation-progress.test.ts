@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  canCancelGeneration,
   formatElapsed,
   getGenerationStage,
   GENERATION_STAGES,
@@ -32,6 +33,14 @@ describe('getGenerationStage', () => {
   it('clamps invalid elapsed values to the first stage', () => {
     expect(getGenerationStage(-1)).toBe(0);
     expect(getGenerationStage(Number.NaN)).toBe(0);
+  });
+});
+
+describe('canCancelGeneration', () => {
+  it('allows cancellation only after 60 seconds', () => {
+    expect(canCancelGeneration(59_999)).toBe(false);
+    expect(canCancelGeneration(60_000)).toBe(true);
+    expect(canCancelGeneration(90_000)).toBe(true);
   });
 });
 

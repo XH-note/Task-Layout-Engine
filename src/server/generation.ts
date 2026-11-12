@@ -14,12 +14,13 @@ import {
   type PlanRecord,
 } from '../shared/plan';
 import { parseWirePlanContent } from '../shared/wire';
-import { AppError } from './errors';
+import { AppError, cancelledError } from './errors';
 import {
   callChatCompletion,
   GENERATION_TIMEOUT_MS,
   type CallModel,
   type ChatMessage,
+  type ChatResult,
   type ChatUsage,
 } from './llm';
 import type { PlanStore } from './plan-store';
@@ -36,6 +37,21 @@ export interface GenerationDependencies {
   callModel?: CallModel;
   now?: () => Date;
   createId?: () => string;
+  sleep?: (ms: number) => Promise<void>;
+}
+
+const AUTO_RETRY_DELAY_MS: Record<string, number> = {
+  PROVIDER_NETWORK: 500,
+  PROVIDER_RATE_LIMIT: 1_000,
+  PROVIDER_SERVER: 500,
+};
+
+export interface GenerateOptions {
+  signal?: AbortSignal;
+}
+
+interface RetryState {
+  autoRetried: boolean;
 }
 
 function invalidInput(message: string, detail: unknown = null): AppError {
@@ -58,6 +74,7 @@ export class GenerationService {
   private readonly callModel: CallModel;
   private readonly now: () => Date;
   private readonly createId: () => string;
+  private readonly sleep: (ms: number) => Promise<void>;
   private busy = false;
 
   constructor(dependencies: GenerationDependencies) {
@@ -66,10 +83,14 @@ export class GenerationService {
     this.callModel = dependencies.callModel ?? callChatCompletion;
     this.now = dependencies.now ?? (() => new Date());
     this.createId = dependencies.createId ?? (() => randomUUID());
+    this.sleep =
+      dependencies.sleep ??
+      ((ms) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
   }
 
-  async generate(rawSource: unknown): Promise<PlanRecord> {
+  async generate(rawSource: unknown, options: GenerateOptions = {}): Promise<PlanRecord> {
     const source = this.validateSource(rawSource);
+    this.throwIfCancelled(options.signal);
 
     if (this.busy) {
       throw new AppError('BUSY', 409, '已有生成请求正在进行，请稍后再试。', {
@@ -80,7 +101,7 @@ export class GenerationService {
     this.busy = true;
 
     try {
-      return await this.run(source);
+      return await this.run(source, options.signal);
     } finally {
       this.busy = false;
     }
@@ -106,8 +127,9 @@ export class GenerationService {
     return rawSource;
   }
 
-  private async run(source: string): Promise<PlanRecord> {
+  private async run(source: string, signal?: AbortSignal): Promise<PlanRecord> {
     const resolved = await this.settingsStore.getResolved();
+    this.throwIfCancelled(signal);
 
     if (!resolved.apiKey) {
       throw invalidInput('尚未配置 API Key，请先在设置中填写并保存。');
@@ -119,23 +141,19 @@ export class GenerationService {
       { role: 'user', content: buildUserPrompt(source) },
     ];
 
-    let response = await this.callModel(settings, {
-      messages,
-      timeoutMs: GENERATION_TIMEOUT_MS,
-    });
+    const retryState: RetryState = { autoRetried: false };
+    let response = await this.invokeModel(settings, messages, signal, retryState);
     this.assertUsable(response.content, response.finishReason);
 
     let usage = response.usage;
     let outcome = this.parseAndValidateOutput(response.content, settings);
 
     if (!outcome.ok) {
+      this.throwIfCancelled(signal);
       messages.push({ role: 'assistant', content: response.content });
       messages.push({ role: 'user', content: buildRepairPrompt(outcome.issues) });
 
-      response = await this.callModel(settings, {
-        messages,
-        timeoutMs: GENERATION_TIMEOUT_MS,
-      });
+      response = await this.invokeModel(settings, messages, signal, retryState);
       this.assertUsable(response.content, response.finishReason);
       usage = mergeUsage(usage, response.usage);
       outcome = this.parseAndValidateOutput(response.content, settings);
@@ -147,6 +165,8 @@ export class GenerationService {
         });
       }
     }
+
+    this.throwIfCancelled(signal);
 
     const generatedAt = this.now().toISOString();
     const record: PlanRecord = {
@@ -164,6 +184,44 @@ export class GenerationService {
     return this.planStore.create(record);
   }
 
+  private async invokeModel(
+    settings: ProviderConnectionSettings,
+    messages: ChatMessage[],
+    signal: AbortSignal | undefined,
+    retryState: RetryState,
+  ): Promise<ChatResult> {
+    for (;;) {
+      this.throwIfCancelled(signal);
+
+      try {
+        const result = await this.callModel(settings, {
+          messages,
+          timeoutMs: GENERATION_TIMEOUT_MS,
+          ...(signal ? { signal } : {}),
+        });
+        this.throwIfCancelled(signal);
+        return result;
+      } catch (error) {
+        this.throwIfCancelled(signal);
+
+        const delay = autoRetryDelay(error);
+        if (retryState.autoRetried || delay === null) {
+          throw error;
+        }
+
+        retryState.autoRetried = true;
+        await this.sleep(delay);
+        this.throwIfCancelled(signal);
+      }
+    }
+  }
+
+  private throwIfCancelled(signal?: AbortSignal): void {
+    if (signal?.aborted) {
+      throw cancelledError();
+    }
+  }
+
   private assertUsable(content: string, finishReason: string): void {
     if (finishReason === 'length') {
       throw new AppError(
@@ -176,10 +234,10 @@ export class GenerationService {
 
     if (content.trim() === '') {
       throw new AppError(
-        'OUTPUT_INVALID',
+        'OUTPUT_TRUNCATED',
         422,
-        '模型返回了空白内容，请重试或更换模型。',
-        { detail: { finishReason } },
+        '模型没有返回任何内容，输出可能已被截断。',
+        { retryable: true, detail: { finishReason } },
       );
     }
   }
@@ -211,6 +269,11 @@ export class GenerationService {
 
     return { ok: true, plan, raw: parsed.raw };
   }
+}
+
+function autoRetryDelay(error: unknown): number | null {
+  if (!(error instanceof AppError)) return null;
+  return AUTO_RETRY_DELAY_MS[error.code] ?? null;
 }
 
 function mergeUsage(

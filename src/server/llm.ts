@@ -1,6 +1,6 @@
 import type { CapabilityTier } from '../shared/settings';
 import { WIRE_PLAN_JSON_SCHEMA } from '../shared/wire';
-import { AppError } from './errors';
+import { AppError, cancelledError } from './errors';
 import type { ProviderConnectionSettings } from './provider';
 
 export type ChatRole = 'system' | 'user' | 'assistant';
@@ -14,6 +14,7 @@ export interface ChatRequest {
   messages: ChatMessage[];
   maxTokens?: number;
   timeoutMs?: number;
+  signal?: AbortSignal;
 }
 
 export interface ChatUsage {
@@ -215,6 +216,20 @@ function isAbortError(error: unknown): boolean {
   return error.name === 'AbortError' || error.name === 'TimeoutError';
 }
 
+function timeoutError(): AppError {
+  return new AppError('PROVIDER_TIMEOUT', 504, '模型服务响应超时，请稍后重试。');
+}
+
+function abortFailure(
+  callerSignal: AbortSignal | undefined,
+  timeoutSignal: AbortSignal,
+  error: unknown,
+): AppError | null {
+  if (callerSignal?.aborted) return cancelledError();
+  if (timeoutSignal.aborted || isAbortError(error)) return timeoutError();
+  return null;
+}
+
 export async function callChatCompletion(
   settings: ProviderConnectionSettings,
   request: ChatRequest,
@@ -222,61 +237,73 @@ export async function callChatCompletion(
 ): Promise<ChatResult> {
   const fetchImpl = options.fetchImpl ?? fetch;
   const body = JSON.stringify(buildGenerationRequestBody(settings, request));
-
-  let response: Response;
+  const timeoutController = new AbortController();
+  const timer = setTimeout(
+    () => timeoutController.abort(),
+    request.timeoutMs ?? GENERATION_TIMEOUT_MS,
+  );
+  const signal = request.signal
+    ? AbortSignal.any([request.signal, timeoutController.signal])
+    : timeoutController.signal;
 
   try {
-    response = await fetchImpl(joinChatCompletions(settings.baseUrl), {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${settings.apiKey}`,
-        'Content-Type': 'application/json',
-      },
-      body,
-      signal: AbortSignal.timeout(request.timeoutMs ?? GENERATION_TIMEOUT_MS),
-    });
-  } catch (error) {
-    if (isAbortError(error)) {
-      throw new AppError('PROVIDER_TIMEOUT', 504, '模型服务响应超时，请稍后重试。', {
+    let response: Response;
+
+    try {
+      response = await fetchImpl(joinChatCompletions(settings.baseUrl), {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${settings.apiKey}`,
+          'Content-Type': 'application/json',
+        },
+        body,
+        signal,
+      });
+    } catch (error) {
+      const aborted = abortFailure(request.signal, timeoutController.signal, error);
+      if (aborted) throw aborted;
+
+      throw new AppError('PROVIDER_NETWORK', 502, '无法连接模型服务，请检查网络或 base URL。', {
         retryable: true,
+        detail: error instanceof Error ? error.message : null,
       });
     }
 
-    throw new AppError('PROVIDER_NETWORK', 502, '无法连接模型服务，请检查网络或 base URL。', {
-      retryable: true,
-      detail: error instanceof Error ? error.message : null,
-    });
+    if (!response.ok) {
+      throw providerFailure(response.status, await readErrorDetail(response));
+    }
+
+    let payload: unknown;
+    try {
+      payload = await response.json();
+    } catch (error) {
+      const aborted = abortFailure(request.signal, timeoutController.signal, error);
+      if (aborted) throw aborted;
+
+      throw new AppError('PROVIDER_BAD_RESPONSE', 502, '模型服务返回了无法解析的响应。');
+    }
+
+    if (!isRecord(payload)) {
+      throw new AppError('PROVIDER_BAD_RESPONSE', 502, '模型服务返回了无法解析的响应。');
+    }
+
+    const choices = payload.choices;
+    if (!Array.isArray(choices) || choices.length === 0 || !isRecord(choices[0])) {
+      throw new AppError('PROVIDER_BAD_RESPONSE', 502, '模型服务没有返回候选结果。');
+    }
+
+    const choice = choices[0];
+    const message = isRecord(choice.message) ? choice.message : {};
+    const finishReason =
+      typeof choice.finish_reason === 'string' ? choice.finish_reason : '';
+
+    return {
+      content: extractContent(message),
+      finishReason,
+      usage: extractUsage(payload),
+      raw: payload,
+    };
+  } finally {
+    clearTimeout(timer);
   }
-
-  if (!response.ok) {
-    throw providerFailure(response.status, await readErrorDetail(response));
-  }
-
-  let payload: unknown;
-  try {
-    payload = await response.json();
-  } catch {
-    throw new AppError('PROVIDER_BAD_RESPONSE', 502, '模型服务返回了无法解析的响应。');
-  }
-
-  if (!isRecord(payload)) {
-    throw new AppError('PROVIDER_BAD_RESPONSE', 502, '模型服务返回了无法解析的响应。');
-  }
-
-  const choices = payload.choices;
-  if (!Array.isArray(choices) || choices.length === 0 || !isRecord(choices[0])) {
-    throw new AppError('PROVIDER_BAD_RESPONSE', 502, '模型服务没有返回候选结果。');
-  }
-
-  const choice = choices[0];
-  const message = isRecord(choice.message) ? choice.message : {};
-  const finishReason =
-    typeof choice.finish_reason === 'string' ? choice.finish_reason : '';
-
-  return {
-    content: extractContent(message),
-    finishReason,
-    usage: extractUsage(payload),
-    raw: payload,
-  };
 }

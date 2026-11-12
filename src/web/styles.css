@@ -523,11 +523,23 @@ button:disabled {
   color: #f7f2e8;
 }
 
+.generation-progress-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 14px;
+}
+
 .generation-elapsed {
-  margin: 14px 0 0;
+  margin: 0;
   color: var(--muted);
   font-size: 11px;
   font-variant-numeric: tabular-nums;
+}
+
+.generation-cancel {
+  color: var(--warning);
 }
 
 .plan-document {
@@ -922,9 +934,49 @@ button:disabled {
   line-height: 1.65;
 }
 
+.generation-error .generation-error-code {
+  margin-top: -4px;
+  color: var(--muted);
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 10px;
+  letter-spacing: 0.02em;
+}
+
 .generation-error .generation-error-note {
   color: var(--muted);
   font-size: 11px;
+}
+
+.generation-error .generation-error-hint {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.generation-error-detail {
+  margin-top: 12px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.generation-error-detail summary {
+  cursor: pointer;
+  user-select: none;
+}
+
+.generation-error-detail pre {
+  max-height: 160px;
+  margin: 8px 0 0;
+  padding: 10px;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.45);
+  color: var(--ink-soft);
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 10px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 .generation-error-actions {

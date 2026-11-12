@@ -3,7 +3,7 @@ import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import type { FastifyInstance } from 'fastify';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { collectLeaves, type PlanRecord } from '../shared/plan';
 import { buildApp } from './app';
@@ -36,7 +36,7 @@ function plansFile(): string {
 
 async function buildTestApp(
   callModel: CallModel,
-  options: { withKey?: boolean } = {},
+  options: { withKey?: boolean; sleep?: (ms: number) => Promise<void> } = {},
 ): Promise<{ app: FastifyInstance; planStore: PlanStore }> {
   const settingsStore = new SettingsStore(dataDir);
 
@@ -51,7 +51,12 @@ async function buildTestApp(
   const planStore = new PlanStore(dataDir);
   const instance = buildApp(
     { logger: false },
-    { settingsStore, planStore, callModel },
+    {
+      settingsStore,
+      planStore,
+      callModel,
+      ...(options.sleep ? { sleep: options.sleep } : {}),
+    },
   );
 
   app = instance;
@@ -183,7 +188,7 @@ describe('POST /api/generate', () => {
     expect(existsSync(plansFile())).toBe(false);
   });
 
-  it('fails all-whitespace output without retrying or persisting', async () => {
+  it('fails all-whitespace output as truncated without retrying or persisting', async () => {
     let calls = 0;
     const callModel: CallModel = async () => {
       calls += 1;
@@ -195,7 +200,7 @@ describe('POST /api/generate', () => {
 
     expect(response.statusCode).toBe(422);
     expect(response.json()).toMatchObject({
-      error: { code: 'OUTPUT_INVALID' },
+      error: { code: 'OUTPUT_TRUNCATED' },
     });
     expect(calls).toBe(1);
     expect(existsSync(plansFile())).toBe(false);
@@ -371,6 +376,179 @@ describe('POST /api/generate', () => {
 
     release();
     await expect(first).resolves.toMatchObject({ statusCode: 201 });
+  });
+
+  it.each([
+    ['PROVIDER_NETWORK', 502, 500],
+    ['PROVIDER_RATE_LIMIT', 502, 1_000],
+    ['PROVIDER_SERVER', 502, 500],
+  ] as const)(
+    'automatically retries %s once before succeeding',
+    async (code, status, delay) => {
+      let calls = 0;
+      const sleeps: number[] = [];
+      const callModel: CallModel = async () => {
+        calls += 1;
+        if (calls === 1) {
+          throw new AppError(code, status, '暂时失败。', { retryable: true });
+        }
+        return modelReply(validWireJson());
+      };
+      await buildTestApp(callModel, {
+        sleep: async (ms) => {
+          sleeps.push(ms);
+        },
+      });
+
+      const response = await postGenerate(SOURCE);
+
+      expect(response.statusCode).toBe(201);
+      expect(calls).toBe(2);
+      expect(sleeps).toEqual([delay]);
+    },
+  );
+
+  it('does not retry provider errors that are not transient', async () => {
+    for (const [code, status] of [
+      ['PROVIDER_AUTH', 502],
+      ['PROVIDER_BAD_REQUEST', 502],
+      ['PROVIDER_TIMEOUT', 504],
+    ] as const) {
+      let calls = 0;
+      const sleeps: number[] = [];
+      const callModel: CallModel = async () => {
+        calls += 1;
+        throw new AppError(code, status, '不可重试。', { retryable: false });
+      };
+      if (app) await app.close();
+      await buildTestApp(callModel, {
+        sleep: async (ms) => {
+          sleeps.push(ms);
+        },
+      });
+
+      const response = await postGenerate(SOURCE);
+
+      expect(response.statusCode).toBe(status);
+      expect(response.json()).toMatchObject({ error: { code } });
+      expect(calls).toBe(1);
+      expect(sleeps).toEqual([]);
+      expect(existsSync(plansFile())).toBe(false);
+    }
+  });
+
+  it('uses one automatic retry for the whole generation, including repair', async () => {
+    let calls = 0;
+    const sleeps: number[] = [];
+    const callModel: CallModel = async () => {
+      calls += 1;
+      if (calls === 3) {
+        throw new AppError('PROVIDER_NETWORK', 502, '网络失败。', { retryable: true });
+      }
+      if (calls === 1) {
+        throw new AppError('PROVIDER_NETWORK', 502, '网络失败。', { retryable: true });
+      }
+      return modelReply('这不是 JSON。');
+    };
+    await buildTestApp(callModel, {
+      sleep: async (ms) => {
+        sleeps.push(ms);
+      },
+    });
+
+    const response = await postGenerate(SOURCE);
+
+    expect(response.statusCode).toBe(502);
+    expect(response.json()).toMatchObject({ error: { code: 'PROVIDER_NETWORK' } });
+    expect(calls).toBe(3);
+    expect(sleeps).toEqual([500]);
+    expect(existsSync(plansFile())).toBe(false);
+  });
+
+  it('does not persist a record when the retry also fails', async () => {
+    let calls = 0;
+    const sleeps: number[] = [];
+    const callModel: CallModel = async () => {
+      calls += 1;
+      throw new AppError('PROVIDER_NETWORK', 502, '网络失败。', { retryable: true });
+    };
+    await buildTestApp(callModel, {
+      sleep: async (ms) => {
+        sleeps.push(ms);
+      },
+    });
+
+    const response = await postGenerate(SOURCE);
+
+    expect(response.statusCode).toBe(502);
+    expect(response.json()).toMatchObject({ error: { code: 'PROVIDER_NETWORK' } });
+    expect(calls).toBe(2);
+    expect(sleeps).toEqual([500]);
+    expect(existsSync(plansFile())).toBe(false);
+  });
+
+  it('cancels the in-flight generation when the client disconnects', async () => {
+    let markStarted: () => void = () => undefined;
+    const started = new Promise<void>((resolve) => {
+      markStarted = resolve;
+    });
+    const callModel: CallModel = async (_settings, request) =>
+      new Promise<ChatResult>((_resolve, reject) => {
+        markStarted();
+        const abort = () => reject(new DOMException('Aborted', 'AbortError'));
+        if (request.signal?.aborted) {
+          abort();
+          return;
+        }
+        request.signal?.addEventListener('abort', abort, { once: true });
+      });
+    const { app, planStore } = await buildTestApp(callModel);
+    const create = vi.spyOn(planStore, 'create');
+    await app.listen({ port: 0, host: '127.0.0.1' });
+
+    const address = app.server.address();
+    if (!address || typeof address === 'string') {
+      throw new Error('测试服务器没有监听端口。');
+    }
+
+    const controller = new AbortController();
+    const request = fetch(`http://127.0.0.1:${address.port}/api/generate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ source: SOURCE }),
+      signal: controller.signal,
+    }).catch((error: unknown) => error);
+
+    await started;
+    controller.abort();
+    await request;
+    await new Promise((resolve) => setTimeout(resolve, 100));
+
+    expect(create).not.toHaveBeenCalled();
+  });
+
+  it('does not abort a normal request when the response closes', async () => {
+    const callModel: CallModel = async () => modelReply(validWireJson());
+    const { app, planStore } = await buildTestApp(callModel);
+    const create = vi.spyOn(planStore, 'create');
+    await app.listen({ port: 0, host: '127.0.0.1' });
+
+    const address = app.server.address();
+    if (!address || typeof address === 'string') {
+      throw new Error('测试服务器没有监听端口。');
+    }
+
+    const response = await fetch(`http://127.0.0.1:${address.port}/api/generate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ source: SOURCE }),
+    });
+
+    expect(response.status).toBe(201);
+    expect(create).toHaveBeenCalledTimes(1);
+    await expect(response.json()).resolves.toMatchObject({
+      record: { plan: { title: expect.any(String) } },
+    });
   });
 
   it('requires an API key before calling the model', async () => {

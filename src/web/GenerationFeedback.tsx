@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 
+import type { GenerationFailure } from './generation-errors';
 import {
+  canCancelGeneration,
   formatElapsed,
   getGenerationStage,
   GENERATION_STAGES,
@@ -20,9 +22,16 @@ function useElapsed(startedAt: number): number {
   return Math.max(0, now - startedAt);
 }
 
-export function GenerationProgress({ startedAt }: { startedAt: number }) {
+export function GenerationProgress({
+  startedAt,
+  onCancel,
+}: {
+  startedAt: number;
+  onCancel: () => void;
+}) {
   const elapsed = useElapsed(startedAt);
   const activeStage = getGenerationStage(elapsed);
+  const canCancel = canCancelGeneration(elapsed);
 
   return (
     <div className="generation-progress">
@@ -52,20 +61,39 @@ export function GenerationProgress({ startedAt }: { startedAt: number }) {
             );
           })}
         </ol>
-        <p className="generation-elapsed">已耗时 {formatElapsed(elapsed)}</p>
+        <div className="generation-progress-footer">
+          <p className="generation-elapsed">已耗时 {formatElapsed(elapsed)}</p>
+          {canCancel ? (
+            <button className="text-button generation-cancel" type="button" onClick={onCancel}>
+              取消生成
+            </button>
+          ) : null}
+        </div>
       </div>
+    </div>
+  );
+}
+
+export function GenerationNotice({
+  message,
+  onDismiss,
+}: {
+  message: string;
+  onDismiss: () => void;
+}) {
+  return (
+    <div className="generation-interrupted" role="status">
+      <p>{message}</p>
+      <button className="text-button" type="button" onClick={onDismiss}>
+        知道了
+      </button>
     </div>
   );
 }
 
 export function GenerationInterrupted({ onDismiss }: { onDismiss: () => void }) {
   return (
-    <div className="generation-interrupted" role="status">
-      <p>上次生成未完成，请重新生成。</p>
-      <button className="text-button" type="button" onClick={onDismiss}>
-        知道了
-      </button>
-    </div>
+    <GenerationNotice message="上次生成未完成，请重新生成。" onDismiss={onDismiss} />
   );
 }
 
@@ -100,15 +128,17 @@ export function GenerationBusy({
 }
 
 export function GenerationError({
-  message,
+  failure,
   canRetry,
   onRetry,
   onBack,
+  onOpenSettings,
 }: {
-  message: string;
+  failure: GenerationFailure;
   canRetry: boolean;
   onRetry: () => void;
   onBack: () => void;
+  onOpenSettings: () => void;
 }) {
   return (
     <div className="generation-error" role="alert">
@@ -116,8 +146,19 @@ export function GenerationError({
         !
       </span>
       <div>
-        <h3>生成失败</h3>
-        <p>{message}</p>
+        <h3>{failure.title}</h3>
+        <p className="generation-error-code">错误码：{failure.code}</p>
+        <p>{failure.description}</p>
+        <p className="generation-error-note">
+          {failure.autoRetried ? '已自动重试一次。' : failure.hint}
+        </p>
+        {failure.autoRetried ? <p className="generation-error-hint">{failure.hint}</p> : null}
+        {failure.detail ? (
+          <details className="generation-error-detail">
+            <summary>技术详情</summary>
+            <pre>{failure.detail}</pre>
+          </details>
+        ) : null}
         <p className="generation-error-note">{RETAINED_SOURCE_NOTE}</p>
         <div className="generation-error-actions">
           <button className="primary-button" type="button" onClick={onRetry} disabled={!canRetry}>
@@ -126,6 +167,15 @@ export function GenerationError({
           <button className="secondary-button" type="button" onClick={onBack}>
             返回修改输入
           </button>
+          {failure.action === 'settings' ? (
+            <button
+              className="secondary-button"
+              type="button"
+              onClick={onOpenSettings}
+            >
+              前往设置
+            </button>
+          ) : null}
         </div>
       </div>
     </div>

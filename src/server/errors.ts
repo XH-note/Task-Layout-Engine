@@ -24,6 +24,10 @@ export class AppError extends Error {
   }
 }
 
+export function cancelledError(): AppError {
+  return new AppError('CANCELLED', 499, '已取消生成。');
+}
+
 export function errorEnvelope(error: AppError) {
   return {
     error: {

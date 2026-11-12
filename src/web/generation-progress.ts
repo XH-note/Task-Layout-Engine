@@ -7,6 +7,8 @@ export const GENERATION_STAGES = [
 
 const STAGE_START_MS = [0, 2_000, 5_000, 10_000] as const;
 
+export const CANCEL_AFTER_MS = 60_000;
+
 export function getGenerationStage(elapsedMs: number): number {
   if (!Number.isFinite(elapsedMs) || elapsedMs <= 0) {
     return 0;
@@ -19,6 +21,10 @@ export function getGenerationStage(elapsedMs: number): number {
   }
 
   return 0;
+}
+
+export function canCancelGeneration(elapsedMs: number): boolean {
+  return Number.isFinite(elapsedMs) && elapsedMs >= CANCEL_AFTER_MS;
 }
 
 export function formatElapsed(elapsedMs: number): string {
