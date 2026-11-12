@@ -1,4 +1,3 @@
-import { randomUUID } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -14,6 +13,7 @@ import {
   type PublicSettings,
   type SettingsDraft,
 } from '../shared/settings';
+import { writeJsonAtomically } from './atomic-json';
 
 export const SETTINGS_FILE_NAME = 'settings.json';
 
@@ -170,8 +170,6 @@ export class SettingsStore {
   }
 
   private async write(settings: StoredSettings): Promise<void> {
-    await fs.mkdir(this.dataDir, { recursive: true });
-
     const payload = {
       schemaVersion: 1,
       baseUrl: settings.baseUrl,
@@ -180,29 +178,6 @@ export class SettingsStore {
       ...(settings.apiKey ? { apiKey: settings.apiKey } : {}),
     };
 
-    const temporaryPath = path.join(
-      this.dataDir,
-      `.${SETTINGS_FILE_NAME}.${process.pid}.${randomUUID()}.tmp`,
-    );
-
-    try {
-      await fs.writeFile(temporaryPath, `${JSON.stringify(payload, null, 2)}\n`, {
-        encoding: 'utf8',
-        mode: 0o600,
-      });
-
-      try {
-        await fs.rename(temporaryPath, this.filePath);
-      } catch (error) {
-        const code = (error as NodeJS.ErrnoException).code;
-        if (code !== 'EEXIST' && code !== 'EPERM') throw error;
-
-        await fs.rm(this.filePath, { force: true });
-        await fs.rename(temporaryPath, this.filePath);
-      }
-    } catch (error) {
-      await fs.rm(temporaryPath, { force: true });
-      throw error;
-    }
+    await writeJsonAtomically(this.dataDir, SETTINGS_FILE_NAME, payload);
   }
 }
