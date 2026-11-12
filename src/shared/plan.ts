@@ -48,6 +48,13 @@ export interface PlanIssue {
   message: string;
 }
 
+export interface LeafOption {
+  id: string;
+  title: string;
+  path: string;
+  number: string;
+}
+
 export interface NormalizeWireOptions {
   createId?: () => string;
   generatedAt?: string;
@@ -195,6 +202,10 @@ export function validatePlan(
           message: '任务层级最多 3 层（阶段 → 任务 → 子任务）。',
         });
         return;
+      }
+
+      if (!node.title.trim()) {
+        issues.push({ path: `${path}.title`, message: '节点标题不能为空。' });
       }
 
       if (nodeById.has(node.id)) {
@@ -416,4 +427,78 @@ export function findPlanNode(
   }
 
   return undefined;
+}
+
+export function findPlanNodePath(
+  nodes: PlanNode[],
+  id: string,
+): PlanNode[] | undefined {
+  for (const node of nodes) {
+    if (node.id === id) return [node];
+    const found = findPlanNodePath(node.children ?? [], id);
+    if (found) return [node, ...found];
+  }
+
+  return undefined;
+}
+
+export function collectLeafOptions(nodes: PlanNode[]): LeafOption[] {
+  const numbers = computeNodeNumbers(nodes);
+  const options: LeafOption[] = [];
+
+  const walk = (list: PlanNode[], trail: string[]) => {
+    for (const node of list) {
+      const nextTrail = [...trail, node.title];
+
+      if (isGroup(node)) {
+        walk(node.children ?? [], nextTrail);
+      } else {
+        options.push({
+          id: node.id,
+          title: node.title,
+          path: nextTrail.join(' / '),
+          number: numbers.get(node.id) ?? '',
+        });
+      }
+    }
+  };
+
+  walk(nodes, []);
+  return options;
+}
+
+export function updatePlanNode(
+  nodes: PlanNode[],
+  id: string,
+  patch: Partial<PlanNode>,
+): PlanNode[] {
+  const walk = (list: PlanNode[]): PlanNode[] => {
+    let changed = false;
+    const next = list.map((node) => {
+      if (node.id === id) {
+        changed = true;
+        const updated: PlanNode = { ...node, ...patch };
+        for (const key of Object.keys(patch) as Array<keyof PlanNode>) {
+          if (patch[key] === undefined) {
+            delete updated[key];
+          }
+        }
+        return updated;
+      }
+
+      if (node.children && node.children.length > 0) {
+        const children = walk(node.children);
+        if (children !== node.children) {
+          changed = true;
+          return { ...node, children };
+        }
+      }
+
+      return node;
+    });
+
+    return changed ? next : list;
+  };
+
+  return walk(nodes);
 }

@@ -1,12 +1,19 @@
 import { create } from 'zustand';
 
-import type { PlanRecord } from '../shared/plan';
-import { ApiError, generatePlan, getPlan } from './api';
+import {
+  updatePlanNode,
+  validatePlan,
+  type PlanIssue,
+  type PlanNode,
+  type PlanRecord,
+} from '../shared/plan';
+import { ApiError, generatePlan, getPlan, updatePlan } from './api';
 import { readStorageValue, writeStorageValue } from './browser-storage';
 import { mapGenerationFailure, type GenerationFailure } from './generation-errors';
 
 const CURRENT_PLAN_KEY = 'task-layout:current-plan-id';
 const GENERATING_KEY = 'task-layout:generating';
+export const SAVE_DEBOUNCE_MS = 800;
 
 export type GenerationPhase = 'idle' | 'generating' | 'failed' | 'busy';
 
@@ -16,22 +23,40 @@ export type GenerationState =
   | { phase: 'failed'; failure: GenerationFailure }
   | { phase: 'busy' };
 
+export type SaveState =
+  | { status: 'idle' }
+  | { status: 'dirty' }
+  | { status: 'saving' }
+  | { status: 'invalid'; message: string }
+  | { status: 'error'; message: string };
+
 type PlanState = {
   record: PlanRecord | null;
   generation: GenerationState;
   interrupted: boolean;
   notice: string | null;
   restored: boolean;
+  selectedNodeId: string | null;
+  saveState: SaveState;
+  editError: string | null;
   restore: () => Promise<void>;
   generate: (source: string) => Promise<void>;
   cancel: () => void;
-  newPlan: () => void;
+  newPlan: () => Promise<void>;
+  selectNode: (id: string | null) => void;
+  updateNode: (id: string, patch: Partial<PlanNode>) => void;
+  saveNow: (options?: { keepalive?: boolean }) => Promise<void>;
+  retrySave: () => Promise<void>;
   dismissIssue: () => void;
   dismissInterrupted: () => void;
   dismissNotice: () => void;
 };
 
 let activeController: AbortController | null = null;
+let saveTimer: ReturnType<typeof setTimeout> | null = null;
+let editRevision = 0;
+let saving = false;
+let saveChain: Promise<void> = Promise.resolve();
 
 function readCurrentPlanId(): string | null {
   return readStorageValue('local', CURRENT_PLAN_KEY);
@@ -45,112 +70,345 @@ function setGeneratingFlag(value: boolean) {
   writeStorageValue('session', GENERATING_KEY, value ? '1' : null);
 }
 
-export const usePlanStore = create<PlanState>((set, get) => ({
-  record: null,
-  generation: { phase: 'idle' },
-  interrupted: false,
-  notice: null,
-  restored: false,
+function clearSaveTimer() {
+  if (saveTimer !== null) {
+    clearTimeout(saveTimer);
+    saveTimer = null;
+  }
+}
 
-  restore: async () => {
-    if (get().restored) return;
+function readFirstIssue(detail: unknown): PlanIssue | null {
+  if (!Array.isArray(detail)) return null;
 
-    const interrupted = readStorageValue('session', GENERATING_KEY) === '1';
-    if (interrupted) setGeneratingFlag(false);
-    set({ restored: true, interrupted });
+  for (const item of detail) {
+    if (typeof item !== 'object' || item === null) continue;
 
-    const id = readCurrentPlanId();
-    if (!id) return;
-
-    try {
-      const record = await getPlan(id);
-      if (get().record !== null) return;
-      set({ record });
-    } catch (error) {
-      if (error instanceof ApiError && error.code === 'NOT_FOUND') {
-        writeCurrentPlanId(null);
-      }
+    const issue = item as { path?: unknown; message?: unknown };
+    if (typeof issue.path === 'string' && typeof issue.message === 'string') {
+      return { path: issue.path, message: issue.message };
     }
-  },
+  }
 
-  generate: async (source) => {
-    if (get().generation.phase === 'generating' || !source.trim()) return;
+  return null;
+}
 
-    const controller = new AbortController();
-    activeController = controller;
-    setGeneratingFlag(true);
-    set({
-      generation: { phase: 'generating', startedAt: Date.now() },
-      interrupted: false,
-      notice: null,
-    });
+function describeIssue(issue: PlanIssue | undefined): string {
+  return issue
+    ? `校验未通过：${issue.message}`
+    : '校验未通过，修改暂未保存。';
+}
+
+function describeSaveFailure(error: unknown): string {
+  if (!(error instanceof ApiError)) {
+    return '保存失败，修改暂未写入。';
+  }
+
+  if (error.code === 'NETWORK_ERROR') {
+    return '无法连接本地服务，修改暂未保存。';
+  }
+
+  if (error.code === 'NOT_FOUND') {
+    return '这份任务计划书已不存在，无法保存。';
+  }
+
+  if (error.code === 'INTEGRITY') {
+    const issue = readFirstIssue(error.detail);
+    return issue ? `校验未通过：${issue.message}` : error.message;
+  }
+
+  if (error.code === 'STORAGE') {
+    return '写入本机数据文件失败，修改暂未保存。';
+  }
+
+  return error.message || '保存失败，修改暂未写入。';
+}
+
+export const usePlanStore = create<PlanState>((set, get) => {
+  function scheduleSave() {
+    clearSaveTimer();
+    saveTimer = setTimeout(() => {
+      saveTimer = null;
+      void requestSave();
+    }, SAVE_DEBOUNCE_MS);
+  }
+
+  async function performSave(keepalive = false): Promise<void> {
+    const state = get();
+    const record = state.record;
+    if (!record) return;
+
+    if (state.saveState.status === 'idle' || state.saveState.status === 'saving') {
+      return;
+    }
+
+    clearSaveTimer();
+
+    const issues = validatePlan(record.plan);
+    if (issues.length > 0) {
+      set({
+        saveState: { status: 'invalid', message: describeIssue(issues[0]) },
+      });
+      return;
+    }
+
+    const revision = editRevision;
+    saving = true;
+    set({ saveState: { status: 'saving' } });
 
     try {
-      const { record } = await generatePlan(source, controller.signal);
-      if (activeController !== controller) return;
+      const saved = await updatePlan(
+        record.id,
+        { title: record.title, plan: record.plan },
+        { keepalive },
+      );
 
-      writeCurrentPlanId(record.id);
-      set({ record, generation: { phase: 'idle' } });
-    } catch (error) {
-      if (activeController !== controller) return;
+      const current = get().record;
+      if (!current || current.id !== record.id) return;
 
-      if (error instanceof ApiError && error.code === 'CANCELLED') {
-        set({ generation: { phase: 'idle' }, notice: '已取消生成。' });
-      } else if (error instanceof ApiError && error.code === 'BUSY') {
-        set({ generation: { phase: 'busy' }, notice: null });
+      if (editRevision === revision) {
+        set({ record: saved, saveState: { status: 'idle' } });
       } else {
         set({
-          generation: {
-            phase: 'failed',
-            failure: mapGenerationFailure(error instanceof ApiError ? error : null),
-          },
-          notice: null,
+          record: { ...current, updatedAt: saved.updatedAt },
+          saveState: { status: 'dirty' },
         });
+        scheduleSave();
       }
+    } catch (error) {
+      if (get().record?.id !== record.id) return;
+      set({ saveState: { status: 'error', message: describeSaveFailure(error) } });
     } finally {
-      if (activeController === controller) {
-        activeController = null;
-        setGeneratingFlag(false);
-      }
+      saving = false;
     }
-  },
+  }
 
-  cancel: () => {
-    if (get().generation.phase !== 'generating') return;
+  function requestSave(keepalive = false): Promise<void> {
+    const run = saveChain.then(() => performSave(keepalive));
+    saveChain = run.catch(() => undefined);
+    return run;
+  }
 
-    const controller = activeController;
-    activeController = null;
-    controller?.abort();
-    setGeneratingFlag(false);
-    set({ generation: { phase: 'idle' }, notice: '已取消生成。' });
-  },
+  function flushKeepalive() {
+    const record = get().record;
+    if (!record) return;
+    if (validatePlan(record.plan).length > 0) return;
 
-  newPlan: () => {
-    const wasGenerating = get().generation.phase === 'generating';
-    if (wasGenerating) get().cancel();
+    void updatePlan(
+      record.id,
+      { title: record.title, plan: record.plan },
+      { keepalive: true },
+    ).catch(() => undefined);
+  }
 
-    writeCurrentPlanId(null);
-    set({
-      record: null,
-      generation: { phase: 'idle' },
-      interrupted: false,
-      notice: wasGenerating ? '已取消生成。' : null,
-    });
-  },
+  return {
+    record: null,
+    generation: { phase: 'idle' },
+    interrupted: false,
+    notice: null,
+    restored: false,
+    selectedNodeId: null,
+    saveState: { status: 'idle' },
+    editError: null,
 
-  dismissIssue: () => {
-    const phase = get().generation.phase;
-    if (phase !== 'failed' && phase !== 'busy') return;
-    set({ generation: { phase: 'idle' } });
-  },
+    restore: async () => {
+      if (get().restored) return;
 
-  dismissInterrupted: () => {
-    if (!get().interrupted) return;
-    set({ interrupted: false });
-  },
+      const interrupted = readStorageValue('session', GENERATING_KEY) === '1';
+      if (interrupted) setGeneratingFlag(false);
+      set({ restored: true, interrupted });
 
-  dismissNotice: () => {
-    if (get().notice === null) return;
-    set({ notice: null });
-  },
-}));
+      const id = readCurrentPlanId();
+      if (!id) return;
+
+      try {
+        const record = await getPlan(id);
+        if (get().record !== null) return;
+        set({
+          record,
+          selectedNodeId: null,
+          saveState: { status: 'idle' },
+          editError: null,
+        });
+      } catch (error) {
+        if (error instanceof ApiError && error.code === 'NOT_FOUND') {
+          writeCurrentPlanId(null);
+        }
+      }
+    },
+
+    generate: async (source) => {
+      if (get().generation.phase === 'generating' || !source.trim()) return;
+
+      await get().saveNow();
+      clearSaveTimer();
+      editRevision += 1;
+
+      const controller = new AbortController();
+      activeController = controller;
+      setGeneratingFlag(true);
+      set({
+        generation: { phase: 'generating', startedAt: Date.now() },
+        interrupted: false,
+        notice: null,
+        saveState: { status: 'idle' },
+        editError: null,
+      });
+
+      try {
+        const { record } = await generatePlan(source, controller.signal);
+        if (activeController !== controller) return;
+
+        writeCurrentPlanId(record.id);
+        set({
+          record,
+          generation: { phase: 'idle' },
+          selectedNodeId: null,
+          saveState: { status: 'idle' },
+          editError: null,
+        });
+      } catch (error) {
+        if (activeController !== controller) return;
+
+        if (error instanceof ApiError && error.code === 'CANCELLED') {
+          set({ generation: { phase: 'idle' }, notice: '已取消生成。' });
+        } else if (error instanceof ApiError && error.code === 'BUSY') {
+          set({ generation: { phase: 'busy' }, notice: null });
+        } else {
+          set({
+            generation: {
+              phase: 'failed',
+              failure: mapGenerationFailure(error instanceof ApiError ? error : null),
+            },
+            notice: null,
+          });
+        }
+      } finally {
+        if (activeController === controller) {
+          activeController = null;
+          setGeneratingFlag(false);
+        }
+      }
+    },
+
+    cancel: () => {
+      if (get().generation.phase !== 'generating') return;
+
+      const controller = activeController;
+      activeController = null;
+      controller?.abort();
+      setGeneratingFlag(false);
+      set({ generation: { phase: 'idle' }, notice: '已取消生成。' });
+    },
+
+    newPlan: async () => {
+      const wasGenerating = get().generation.phase === 'generating';
+      if (wasGenerating) get().cancel();
+
+      if (get().record) {
+        for (let attempt = 0; attempt < 3; attempt += 1) {
+          await get().saveNow();
+          if (get().saveState.status !== 'dirty') break;
+        }
+
+        const status = get().saveState.status;
+        if (
+          status === 'error' ||
+          status === 'invalid' ||
+          status === 'dirty' ||
+          status === 'saving'
+        ) {
+          set({ notice: '修改尚未保存，暂无法新建计划。请先处理保存问题。' });
+          return;
+        }
+      }
+
+      clearSaveTimer();
+      editRevision += 1;
+      writeCurrentPlanId(null);
+      set({
+        record: null,
+        generation: { phase: 'idle' },
+        interrupted: false,
+        notice: wasGenerating ? '已取消生成。' : null,
+        selectedNodeId: null,
+        saveState: { status: 'idle' },
+        editError: null,
+      });
+    },
+
+    selectNode: (id) => {
+      if (get().selectedNodeId === id) return;
+      set({ selectedNodeId: id, editError: null });
+    },
+
+    updateNode: (id, patch) => {
+      const record = get().record;
+      if (!record) return;
+
+      const nodes = updatePlanNode(record.plan.nodes, id, patch);
+      if (nodes === record.plan.nodes) return;
+
+      const plan = { ...record.plan, nodes };
+
+      if ('deps' in patch) {
+        const dependencyIssue = validatePlan(plan).find(
+          (issue) => issue.path === 'deps' || issue.path.includes('.deps'),
+        );
+
+        if (dependencyIssue) {
+          set({ editError: `依赖不合法：${dependencyIssue.message}` });
+          return;
+        }
+      }
+
+      editRevision += 1;
+      set({
+        record: { ...record, plan },
+        saveState: { status: 'dirty' },
+        editError: null,
+      });
+      scheduleSave();
+    },
+
+    saveNow: async (options = {}) => {
+      clearSaveTimer();
+
+      if (options.keepalive && saving) {
+        flushKeepalive();
+        return;
+      }
+
+      if (get().saveState.status === 'saving') {
+        await saveChain;
+      }
+
+      const status = get().saveState.status;
+      if (status !== 'dirty' && status !== 'error' && status !== 'invalid') {
+        return;
+      }
+
+      await requestSave(options.keepalive ?? false);
+    },
+
+    retrySave: async () => {
+      clearSaveTimer();
+      await requestSave();
+    },
+
+    dismissIssue: () => {
+      const phase = get().generation.phase;
+      if (phase !== 'failed' && phase !== 'busy') return;
+      set({ generation: { phase: 'idle' } });
+    },
+
+    dismissInterrupted: () => {
+      if (!get().interrupted) return;
+      set({ interrupted: false });
+    },
+
+    dismissNotice: () => {
+      if (get().notice === null) return;
+      set({ notice: null });
+    },
+  };
+});

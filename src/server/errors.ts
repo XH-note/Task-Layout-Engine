@@ -1,6 +1,7 @@
 export interface AppErrorOptions {
   retryable?: boolean;
   detail?: unknown;
+  nodePath?: string;
 }
 
 export class AppError extends Error {
@@ -8,6 +9,7 @@ export class AppError extends Error {
   readonly status: number;
   readonly retryable: boolean;
   readonly detail?: unknown;
+  readonly nodePath?: string;
 
   constructor(
     code: string,
@@ -21,6 +23,7 @@ export class AppError extends Error {
     this.status = status;
     this.retryable = options.retryable ?? false;
     this.detail = options.detail;
+    this.nodePath = options.nodePath;
   }
 }
 
@@ -35,6 +38,7 @@ export function errorEnvelope(error: AppError) {
       message: error.message,
       detail: error.detail ?? null,
       retryable: error.retryable,
+      ...(error.nodePath !== undefined ? { nodePath: error.nodePath } : {}),
     },
   };
 }

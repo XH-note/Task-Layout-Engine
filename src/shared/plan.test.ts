@@ -6,11 +6,16 @@ import {
   validWirePlan,
 } from '../test-support/wire-plan';
 import {
+  collectLeafOptions,
   computeNodeNumbers,
+  findPlanNode,
+  findPlanNodePath,
   normalizeWirePlan,
+  updatePlanNode,
   validatePlan,
   type PlanNode,
 } from './plan';
+import { planSchema } from './plan-schema';
 
 function sequentialIds(): () => string {
   let next = 0;
@@ -159,6 +164,21 @@ describe('validatePlan', () => {
     const { plan } = normalized();
 
     expect(issueMessages(plan, true)).toEqual([]);
+  });
+
+  it('rejects nodes with an empty title', () => {
+    const { plan } = normalized();
+    const inventory = plan.nodes[0]!.children![0]!;
+    inventory.title = '   ';
+
+    expect(validatePlan(plan)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          path: 'nodes[0].children[0].title',
+          message: '节点标题不能为空。',
+        }),
+      ]),
+    );
   });
 
   it('rejects plans whose top-level node is not a stage', () => {
@@ -322,5 +342,89 @@ describe('validatePlan', () => {
     expect(issueMessages(plan)).toEqual(
       expect.arrayContaining([expect.stringContaining('id')]),
     );
+  });
+});
+
+describe('collectLeafOptions', () => {
+  it('lists only leaves with their number and title path', () => {
+    const { plan } = normalized();
+    const options = collectLeafOptions(plan.nodes);
+
+    expect(options).toHaveLength(12);
+    expect(options[0]).toEqual({
+      id: 'id-2',
+      title: '盘点依赖',
+      path: '准备阶段 / 盘点依赖',
+      number: '1.1',
+    });
+    expect(options[11]).toEqual({
+      id: 'id-15',
+      title: '复盘总结',
+      path: '收尾阶段 / 复盘总结',
+      number: '3.4',
+    });
+  });
+});
+
+describe('findPlanNodePath', () => {
+  it('returns the ancestor chain for a nested node', () => {
+    const { plan } = normalized();
+    const path = findPlanNodePath(plan.nodes, 'id-8');
+
+    expect(path?.map((node) => node.title)).toEqual(['执行阶段', '切换 DNS']);
+  });
+
+  it('returns undefined for an unknown node', () => {
+    const { plan } = normalized();
+
+    expect(findPlanNodePath(plan.nodes, 'missing')).toBeUndefined();
+  });
+});
+
+describe('updatePlanNode', () => {
+  it('updates a nested node without mutating the original tree', () => {
+    const { plan } = normalized();
+    const nodes = updatePlanNode(plan.nodes, 'id-2', {
+      title: '重新盘点依赖',
+      estimateHours: 3,
+    });
+
+    expect(findPlanNode(nodes, 'id-2')).toMatchObject({
+      title: '重新盘点依赖',
+      estimateHours: 3,
+    });
+    expect(findPlanNode(plan.nodes, 'id-2')).toMatchObject({
+      title: '盘点依赖',
+      estimateHours: 2,
+    });
+    expect(nodes).not.toBe(plan.nodes);
+    expect(nodes[0]).not.toBe(plan.nodes[0]);
+  });
+
+  it('clears an optional field when the patch value is undefined', () => {
+    const { plan } = normalized();
+    const nodes = updatePlanNode(plan.nodes, 'id-2', { desc: undefined });
+
+    expect(findPlanNode(nodes, 'id-2')).not.toHaveProperty('desc');
+    expect(findPlanNode(plan.nodes, 'id-2')).toHaveProperty('desc');
+  });
+
+  it('returns the original array when the node is absent', () => {
+    const { plan } = normalized();
+
+    expect(updatePlanNode(plan.nodes, 'missing', { title: 'x' })).toBe(
+      plan.nodes,
+    );
+  });
+});
+
+describe('planSchema', () => {
+  it('accepts a normalized plan and rejects malformed node trees', () => {
+    const { plan } = normalized();
+
+    expect(planSchema.safeParse(plan).success).toBe(true);
+    expect(
+      planSchema.safeParse({ ...plan, nodes: [{ id: 'x' }] }).success,
+    ).toBe(false);
   });
 });

@@ -1,3 +1,5 @@
+import type { KeyboardEvent } from 'react';
+
 import {
   computeNodeNumbers,
   isGroup,
@@ -8,23 +10,47 @@ import { computeStageSummary, formatHours } from '../shared/summary';
 
 interface PlanTreeProps {
   nodes: PlanNode[];
+  selectedId: string | null;
+  onSelect: (id: string) => void;
+}
+
+function activateOnKeyDown(
+  event: KeyboardEvent<HTMLElement>,
+  onActivate: () => void,
+) {
+  if (event.key === 'Enter' || event.key === ' ') {
+    event.preventDefault();
+    onActivate();
+  }
 }
 
 function PlanBranch({
   node,
   numbers,
+  selectedId,
+  onSelect,
 }: {
   node: PlanNode;
   numbers: Map<string, string>;
+  selectedId: string | null;
+  onSelect: (id: string) => void;
 }) {
   const children = node.children ?? [];
   const group = isGroup(node);
   const number = numbers.get(node.id) ?? '';
   const dependencies = resolveDependencyNumbers(node.deps, numbers);
+  const selected = selectedId === node.id;
 
   return (
     <li className={group ? 'plan-branch' : 'plan-leaf'}>
-      <div className="plan-row">
+      <div
+        className={selected ? 'plan-row selected' : 'plan-row'}
+        role="button"
+        tabIndex={0}
+        aria-current={selected ? 'true' : undefined}
+        onClick={() => onSelect(node.id)}
+        onKeyDown={(event) => activateOnKeyDown(event, () => onSelect(node.id))}
+      >
         <span className="plan-number">{number}</span>
         <div className="plan-node-body">
           <div className="plan-node-heading">
@@ -65,7 +91,13 @@ function PlanBranch({
       {group ? (
         <ul className="plan-children">
           {children.map((child) => (
-            <PlanBranch key={child.id} node={child} numbers={numbers} />
+            <PlanBranch
+              key={child.id}
+              node={child}
+              numbers={numbers}
+              selectedId={selectedId}
+              onSelect={onSelect}
+            />
           ))}
         </ul>
       ) : null}
@@ -73,17 +105,29 @@ function PlanBranch({
   );
 }
 
-export default function PlanTree({ nodes }: PlanTreeProps) {
+export default function PlanTree({ nodes, selectedId, onSelect }: PlanTreeProps) {
   const numbers = computeNodeNumbers(nodes);
 
   return (
     <div className="plan-tree">
       {nodes.map((stage) => {
         const summary = computeStageSummary(stage);
+        const selected = selectedId === stage.id;
 
         return (
           <section className="plan-stage" key={stage.id}>
-            <header className="plan-stage-heading">
+            <header
+              className={
+                selected ? 'plan-stage-heading selected' : 'plan-stage-heading'
+              }
+              role="button"
+              tabIndex={0}
+              aria-current={selected ? 'true' : undefined}
+              onClick={() => onSelect(stage.id)}
+              onKeyDown={(event) =>
+                activateOnKeyDown(event, () => onSelect(stage.id))
+              }
+            >
               <span className="plan-number plan-stage-number">
                 {numbers.get(stage.id)}
               </span>
@@ -95,7 +139,13 @@ export default function PlanTree({ nodes }: PlanTreeProps) {
             </header>
             <ul className="plan-stage-list">
               {(stage.children ?? []).map((child) => (
-                <PlanBranch key={child.id} node={child} numbers={numbers} />
+                <PlanBranch
+                  key={child.id}
+                  node={child}
+                  numbers={numbers}
+                  selectedId={selectedId}
+                  onSelect={onSelect}
+                />
               ))}
             </ul>
           </section>

@@ -70,6 +70,37 @@ describe('PlanStore', () => {
     expect(raw.plans.map((plan) => plan.id)).toEqual(['newer', 'older']);
   });
 
+  it('updates an existing record in place and persists it', async () => {
+    const store = new PlanStore(dataDir);
+    const created = await store.create(record('kept'));
+    await store.create(record('other'));
+
+    const updated: PlanRecord = {
+      ...created,
+      title: '更新后的标题',
+      updatedAt: '2026-11-12T10:00:00.000Z',
+      plan: { ...created.plan, title: '更新后的标题' },
+    };
+    await expect(store.update(updated)).resolves.toEqual(updated);
+
+    const raw = JSON.parse(
+      await fs.readFile(path.join(dataDir, PLANS_FILE_NAME), 'utf8'),
+    ) as { plans: PlanRecord[] };
+
+    expect(raw.plans.map((plan) => plan.id)).toEqual(['other', 'kept']);
+    await expect(new PlanStore(dataDir).get('kept')).resolves.toEqual(updated);
+  });
+
+  it('rejects updating a record that does not exist', async () => {
+    const store = new PlanStore(dataDir);
+    const failure = await store
+      .update(record('missing'))
+      .catch((error: unknown) => error);
+
+    expect(failure).toBeInstanceOf(AppError);
+    expect((failure as AppError).code).toBe('NOT_FOUND');
+  });
+
   it('refuses data files written by a newer schema version', async () => {
     await fs.writeFile(
       path.join(dataDir, PLANS_FILE_NAME),

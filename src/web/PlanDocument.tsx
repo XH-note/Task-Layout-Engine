@@ -39,7 +39,15 @@ function PlanList({ items, empty }: { items: string[]; empty: string }) {
   );
 }
 
-export default function PlanDocument({ record }: { record: PlanRecord }) {
+export default function PlanDocument({
+  record,
+  selectedNodeId,
+  onSelectNode,
+}: {
+  record: PlanRecord;
+  selectedNodeId: string | null;
+  onSelectNode: (id: string) => void;
+}) {
   const { plan } = record;
   const summary = computePlanSummary(plan);
 
@@ -83,7 +91,11 @@ export default function PlanDocument({ record }: { record: PlanRecord }) {
       </PlanSection>
 
       <PlanSection title="任务分解">
-        <PlanTree nodes={plan.nodes} />
+        <PlanTree
+          nodes={plan.nodes}
+          selectedId={selectedNodeId}
+          onSelect={onSelectNode}
+        />
       </PlanSection>
 
       <PlanSection title="里程碑">

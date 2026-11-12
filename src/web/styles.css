@@ -177,6 +177,34 @@ button:disabled {
   opacity: 0.7;
 }
 
+.save-status {
+  display: inline-flex;
+  align-items: center;
+  min-height: 30px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--panel-soft);
+  color: var(--muted);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  white-space: nowrap;
+}
+
+button.save-status {
+  cursor: pointer;
+}
+
+.save-status-error {
+  border-color: rgba(180, 74, 47, 0.3);
+  background: var(--warning-soft);
+  color: var(--warning);
+}
+
+button.save-status-error:hover {
+  border-color: var(--warning);
+}
+
 .workbench {
   flex: 1;
   display: grid;
@@ -629,6 +657,17 @@ button:disabled {
   padding: 12px 14px;
   border-bottom: 1px solid var(--line);
   background: rgba(231, 239, 233, 0.4);
+  cursor: pointer;
+  transition: background 150ms ease;
+}
+
+.plan-stage-heading:hover {
+  background: rgba(231, 239, 233, 0.75);
+}
+
+.plan-stage-heading.selected {
+  background: var(--accent-soft);
+  box-shadow: inset 3px 0 0 var(--accent);
 }
 
 .plan-stage-heading h5 {
@@ -686,7 +725,24 @@ button:disabled {
   align-items: flex-start;
   gap: 9px;
   min-width: 0;
-  padding: 8px 0;
+  margin: 0 -6px;
+  padding: 8px 6px;
+  border-radius: 7px;
+  cursor: pointer;
+  transition: background 150ms ease;
+}
+
+.plan-row:hover {
+  background: rgba(47, 107, 79, 0.06);
+}
+
+.plan-row.selected {
+  background: var(--accent-soft);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+.plan-row.selected .plan-node-title {
+  color: var(--accent-deep);
 }
 
 .plan-node-body {
@@ -798,7 +854,7 @@ button:disabled {
 }
 
 .plan-leaf .plan-row {
-  padding: 7px 0;
+  padding: 7px 6px;
 }
 
 .plan-table {
@@ -1110,6 +1166,151 @@ button:disabled {
   background: var(--panel-soft);
   color: var(--accent);
   font-size: 18px;
+}
+
+.inspector-form {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  flex-direction: column;
+  gap: 14px;
+  padding-top: 16px;
+  padding-right: 4px;
+  overflow-y: auto;
+}
+
+.inspector-form::-webkit-scrollbar {
+  width: 8px;
+}
+
+.inspector-form::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background: var(--line-strong);
+  background-clip: padding-box;
+}
+
+.inspector-node-heading {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--line);
+}
+
+.inspector-node-title {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 650;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.inspector-node-kind {
+  margin: 3px 0 0;
+  color: var(--muted);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+}
+
+.inspector-textarea {
+  width: 100%;
+  min-height: 72px;
+  padding: 10px 12px;
+  resize: vertical;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: #fffdf8;
+  color: var(--ink);
+  font-size: 12px;
+  line-height: 1.65;
+  transition: border-color 160ms ease, box-shadow 160ms ease;
+}
+
+.inspector-textarea:focus {
+  border-color: rgba(47, 107, 79, 0.52);
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(47, 107, 79, 0.1);
+}
+
+.inspector-textarea::placeholder {
+  color: #a8a296;
+}
+
+.inspector-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.inspector-grid .select-input,
+.inspector-grid .text-input {
+  font-size: 12px;
+}
+
+.inspector-error {
+  margin: 0;
+  padding: 8px 10px;
+  border: 1px solid rgba(180, 74, 47, 0.25);
+  border-radius: 8px;
+  background: var(--warning-soft);
+  color: var(--warning);
+  font-size: 11px;
+  line-height: 1.6;
+}
+
+.inspector-hint {
+  margin: 0;
+  padding-top: 10px;
+  border-top: 1px dashed var(--line);
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.5;
+}
+
+.dependency-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.dependency-chip {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--panel-soft);
+  font-size: 11px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.dependency-remove {
+  display: grid;
+  flex: 0 0 auto;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1;
+}
+
+.dependency-remove:hover {
+  background: var(--warning-soft);
+  color: var(--warning);
+}
+
+.dependency-empty {
+  color: var(--muted);
+  font-size: 11px;
 }
 
 .app-footer {

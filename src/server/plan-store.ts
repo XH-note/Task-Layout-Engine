@@ -108,6 +108,29 @@ export class PlanStore {
     return record;
   }
 
+  async update(record: PlanRecord): Promise<PlanRecord> {
+    await this.ensureLoaded();
+
+    const index = this.plans.findIndex((plan) => plan.id === record.id);
+    if (index === -1) {
+      throw new AppError('NOT_FOUND', 404, '找不到该任务计划书。');
+    }
+
+    const previous = this.plans;
+    const next = [...this.plans];
+    next[index] = record;
+    this.plans = next;
+
+    try {
+      await this.write();
+    } catch (error) {
+      this.plans = previous;
+      throw error;
+    }
+
+    return record;
+  }
+
   private async write(): Promise<void> {
     const payload: PlansFile = {
       schemaVersion: PLANS_SCHEMA_VERSION,

@@ -9,6 +9,7 @@ import {
   GenerationProgress,
   RETAINED_SOURCE_NOTE,
 } from './GenerationFeedback';
+import Inspector from './Inspector';
 import PlanDocument from './PlanDocument';
 import SettingsDialog from './SettingsDialog';
 import { usePlanStore } from './plan-store';
@@ -89,6 +90,10 @@ export default function App() {
   const generate = usePlanStore((state) => state.generate);
   const cancel = usePlanStore((state) => state.cancel);
   const newPlan = usePlanStore((state) => state.newPlan);
+  const selectedNodeId = usePlanStore((state) => state.selectedNodeId);
+  const selectNode = usePlanStore((state) => state.selectNode);
+  const saveState = usePlanStore((state) => state.saveState);
+  const retrySave = usePlanStore((state) => state.retrySave);
   const dismissIssue = usePlanStore((state) => state.dismissIssue);
   const dismissInterrupted = usePlanStore((state) => state.dismissInterrupted);
   const dismissNotice = usePlanStore((state) => state.dismissNotice);
@@ -106,6 +111,23 @@ export default function App() {
   useEffect(() => {
     void restore();
   }, [restore]);
+
+  useEffect(() => {
+    const flushPendingSave = () => {
+      void usePlanStore.getState().saveNow({ keepalive: true });
+    };
+    const flushWhenHidden = () => {
+      if (document.visibilityState === 'hidden') flushPendingSave();
+    };
+
+    window.addEventListener('pagehide', flushPendingSave);
+    document.addEventListener('visibilitychange', flushWhenHidden);
+
+    return () => {
+      window.removeEventListener('pagehide', flushPendingSave);
+      document.removeEventListener('visibilitychange', flushWhenHidden);
+    };
+  }, []);
 
   useEffect(() => {
     const guardUnsavedDraft = (event: BeforeUnloadEvent) => {
@@ -126,9 +148,11 @@ export default function App() {
   };
 
   const handleNewPlan = () => {
-    newPlan();
-    clearSource();
-    textareaRef.current?.focus();
+    void newPlan().then(() => {
+      if (usePlanStore.getState().record !== null) return;
+      clearSource();
+      textareaRef.current?.focus();
+    });
   };
 
   const handleGenerate = () => {
@@ -150,7 +174,11 @@ export default function App() {
   const priorPlan = record ? (
     <div className="prior-plan">
       <p className="prior-plan-label">上次生成的计划书仍保留</p>
-      <PlanDocument record={record} />
+      <PlanDocument
+        record={record}
+        selectedNodeId={selectedNodeId}
+        onSelectNode={selectNode}
+      />
     </div>
   ) : null;
 
@@ -168,6 +196,32 @@ export default function App() {
         </div>
 
         <nav className="topbar-actions" aria-label="全局操作">
+          {saveState.status === 'saving' ? (
+            <span className="save-status" role="status">
+              保存中…
+            </span>
+          ) : saveState.status === 'dirty' ? (
+            <span className="save-status" role="status">
+              未保存
+            </span>
+          ) : saveState.status === 'invalid' ? (
+            <span
+              className="save-status save-status-error"
+              role="status"
+              title={saveState.message}
+            >
+              未保存 · 请修正
+            </span>
+          ) : saveState.status === 'error' ? (
+            <button
+              className="save-status save-status-error"
+              type="button"
+              onClick={() => void retrySave()}
+              title={saveState.message}
+            >
+              未保存 · 重试
+            </button>
+          ) : null}
           <button className="quiet-button" type="button" onClick={handleNewPlan}>
             新建计划
           </button>
@@ -287,7 +341,11 @@ export default function App() {
                 {priorPlan}
               </>
             ) : record ? (
-              <PlanDocument record={record} />
+              <PlanDocument
+                record={record}
+                selectedNodeId={selectedNodeId}
+                onSelectNode={selectNode}
+              />
             ) : (
               <div className="empty-document">
                 <div className="empty-sheet" aria-hidden="true">
@@ -312,13 +370,7 @@ export default function App() {
             </div>
           </div>
 
-          <div className="empty-inspector">
-            <div className="empty-inspector-mark" aria-hidden="true">
-              ↖
-            </div>
-            <h3>选择一个任务</h3>
-            <p>生成计划书后，点击任务即可在这里编辑标题、工时、依赖和验收标准。</p>
-          </div>
+          <Inspector />
         </aside>
       </main>
 

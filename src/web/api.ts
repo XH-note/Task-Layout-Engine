@@ -1,10 +1,16 @@
-import type { PlanRecord } from '../shared/plan';
+import type { Plan, PlanRecord } from '../shared/plan';
 import type {
   PublicSettings,
   SettingsDraft,
   SettingsError,
   TestConnectionResult,
 } from '../shared/settings';
+
+interface ApiErrorPayload extends SettingsError {
+  detail?: unknown;
+  retryable?: boolean;
+  nodePath?: string;
+}
 
 export class ApiError extends Error {
   readonly code: string;
@@ -13,8 +19,9 @@ export class ApiError extends Error {
   readonly column?: number;
   readonly detail?: unknown;
   readonly retryable: boolean;
+  readonly nodePath?: string;
 
-  constructor(error: SettingsError & { detail?: unknown; retryable?: boolean }) {
+  constructor(error: ApiErrorPayload) {
     super(error.message);
     this.name = 'ApiError';
     this.code = error.code;
@@ -23,11 +30,12 @@ export class ApiError extends Error {
     this.column = error.column;
     this.detail = error.detail;
     this.retryable = error.retryable ?? false;
+    this.nodePath = error.nodePath;
   }
 }
 
 interface ErrorEnvelope {
-  error?: SettingsError & { detail?: unknown; retryable?: boolean };
+  error?: ApiErrorPayload;
 }
 
 function isAbortError(error: unknown): boolean {
@@ -82,6 +90,7 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
       column: error?.column,
       detail: error?.detail,
       retryable: error?.retryable,
+      nodePath: error?.nodePath,
     });
   }
 
@@ -122,4 +131,17 @@ export function generatePlan(
 
 export function getPlan(id: string): Promise<PlanRecord> {
   return request<PlanRecord>(`/api/plans/${encodeURIComponent(id)}`);
+}
+
+export function updatePlan(
+  id: string,
+  payload: { title: string; plan: Plan },
+  options: { keepalive?: boolean } = {},
+): Promise<PlanRecord> {
+  return request<PlanRecord>(`/api/plans/${encodeURIComponent(id)}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+    ...(options.keepalive ? { keepalive: true } : {}),
+  });
 }

@@ -1,5 +1,7 @@
 import Fastify, { type FastifyServerOptions } from 'fastify';
 
+import { validatePlan, type Plan, type PlanRecord } from '../shared/plan';
+import { planSchema } from '../shared/plan-schema';
 import { resolveCapability, validateSettingsDraft } from '../shared/settings';
 import { AppError, errorEnvelope } from './errors';
 import { GenerationService } from './generation';
@@ -151,6 +153,61 @@ export function buildApp(options: FastifyServerOptions = {}, dependencies: AppDe
     }
 
     return record;
+  });
+
+  app.put<{ Params: { id: string } }>('/api/plans/:id', async (request) => {
+    const existing = await planStore.get(request.params.id);
+
+    if (!existing) {
+      throw new AppError('NOT_FOUND', 404, '找不到该任务计划书。');
+    }
+
+    const body = isRecord(request.body) ? request.body : {};
+    const parsed = planSchema.safeParse(body.plan);
+
+    if (!parsed.success) {
+      throw new AppError('INVALID_INPUT', 400, '任务计划书格式不正确。', {
+        detail: parsed.error.issues.map((issue) => ({
+          path: issue.path.join('.'),
+          message: issue.message,
+        })),
+      });
+    }
+
+    if (body.title !== undefined && typeof body.title !== 'string') {
+      throw new AppError('INVALID_INPUT', 400, '计划标题格式不正确。');
+    }
+
+    const title =
+      typeof body.title === 'string'
+        ? body.title.trim()
+        : parsed.data.title.trim();
+
+    if (title && parsed.data.title.trim() !== title) {
+      throw new AppError('INVALID_INPUT', 400, '计划标题与计划内容不一致。', {
+        detail: { path: 'title', message: '请求标题必须与计划标题相同。' },
+      });
+    }
+
+    const plan: Plan = { ...parsed.data, title };
+    const issues = validatePlan(plan);
+
+    if (issues.length > 0) {
+      const first = issues[0]!;
+      throw new AppError('INTEGRITY', 422, `计划不完整：${first.message}`, {
+        detail: issues,
+        nodePath: first.path,
+      });
+    }
+
+    const updated: PlanRecord = {
+      ...existing,
+      title,
+      plan,
+      updatedAt: new Date().toISOString(),
+    };
+
+    return planStore.update(updated);
   });
 
   return app;
