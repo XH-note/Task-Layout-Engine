@@ -1,0 +1,28 @@
+name: task-layout-engine
+
+services:
+  api:
+    build:
+      context: .
+      target: api
+    environment:
+      HOST: 0.0.0.0
+      PORT: 8787
+      # 设置与计划库都落在这个目录，挂卷后重建容器不丢数据
+      TASK_LAYOUT_DATA_DIR: /data
+    volumes:
+      - task-layout-data:/data
+    restart: unless-stopped
+
+  web:
+    build:
+      context: .
+      target: web
+    ports:
+      - "18787:80"
+    depends_on:
+      - api
+    restart: unless-stopped
+
+volumes:
+  task-layout-data:
